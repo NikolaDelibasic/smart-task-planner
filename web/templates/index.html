@@ -1,0 +1,384 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title or "Tasks" }} · {{ app_name }}{% endblock %}
+{% block page_title %}{{ title or "Tasks" }}{% endblock %}
+{% block page_subtitle %}Create, prioritize, and manage tasks with smart recommendations and risk analysis.{% endblock %}
+
+{% block content %}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body p-4">
+        <h3 class="h5 mb-3">Add New Task</h3>
+
+        <form method="post" action="/add" class="row g-3">
+            <div class="col-lg-4">
+                <label class="form-label">Title</label>
+                <input type="text" name="title" class="form-control" placeholder="Enter task title" required>
+            </div>
+
+            <div class="col-lg-2 col-md-4">
+                <label class="form-label">Priority</label>
+                <input id="priority" type="number" name="priority" min="1" max="3" class="form-control" required>
+            </div>
+
+            <div class="col-lg-3 col-md-4">
+                <label class="form-label">Deadline</label>
+                <input id="deadline" type="date" name="deadline" class="form-control" required>
+            </div>
+
+            <div class="col-lg-2 col-md-4">
+                <label class="form-label">Duration (min)</label>
+                <input id="duration" type="number" name="duration" min="1" class="form-control" required>
+                <input type="hidden" name="used_recommendation" id="usedRecommendationInput" value="0">
+            </div>
+
+            <div class="col-lg-1 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">Add</button>
+            </div>
+
+            <div class="col-12">
+                <div class="form-text" id="recommendationText">
+                    Tip: enter Priority, Deadline and Duration to get a smart recommendation.
+                </div>
+
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="useRecommendedBtn" disabled>
+                        Use recommended
+                    </button>
+                </div>
+
+                <div class="form-text mt-2 risk-box" id="riskText"></div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="page-actions mb-3">
+    <a class="btn btn-sm {% if active_page == 'all' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/">All</a>
+    <a class="btn btn-sm {% if active_page == 'active' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/active">Active</a>
+    <a class="btn btn-sm {% if active_page == 'done' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/done">Completed</a>
+    <a class="btn btn-sm {% if active_page == 'suggest' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/suggest">Suggested Order</a>
+    <a class="btn btn-sm {% if active_page == 'planner' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/planner">Daily Planner</a>
+    <a class="btn btn-sm {% if active_page == 'stats' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/stats">Statistics</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body p-4">
+        <div class="d-flex flex-wrap gap-2 align-items-end">
+            <div class="me-2">
+                <div class="small text-muted mb-2">Quick Views</div>
+                <div class="d-flex flex-wrap gap-2">
+                    <a class="btn btn-sm btn-outline-secondary" href="/view?mode=today">Today</a>
+                    <a class="btn btn-sm btn-outline-secondary" href="/view?mode=week">This Week</a>
+                    <a class="btn btn-sm btn-outline-secondary" href="/view?mode=month">This Month</a>
+                    <a class="btn btn-sm btn-outline-secondary" href="/view?mode=year">This Year</a>
+                </div>
+            </div>
+
+            <form method="get" action="/view" class="ms-auto d-flex gap-2 align-items-end flex-wrap">
+                <div>
+                    <label class="form-label mb-1">Custom Date</label>
+                    <input type="date" name="date" class="form-control">
+                </div>
+                <button type="submit" class="btn btn-outline-secondary">Go</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% if workload and workload.level != "none" %}
+    <div class="card border-0 shadow-sm mb-4 overload-card overload-{{ workload.level }}">
+        <div class="card-body p-4">
+            <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                <div>
+                    <h3 class="h5 mb-2">
+                        {% if workload.level == "high" %}
+                            Overload Warning
+                        {% else %}
+                            Workload Notice
+                        {% endif %}
+                    </h3>
+
+                    <div class="small text-muted mb-3">
+                        Workload utilization: {{ workload.utilization }}% ·
+                        Active tasks: {{ workload.active_count }} ·
+                        Urgent tasks: {{ workload.urgent_count }} ·
+                        High-risk tasks: {{ workload.risk_count }}
+                    </div>
+
+                    <ul class="mb-0">
+                        {% for warning in workload.warnings %}
+                            <li class="mb-2">{{ warning }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                <div>
+                    {% if workload.level == "high" %}
+                        <span class="badge text-bg-danger">High Pressure</span>
+                    {% else %}
+                        <span class="badge text-bg-warning">Monitor Workload</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+
+{% if tasks %}
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Task</th>
+                            <th>Priority</th>
+                            <th>Planned</th>
+                            <th>Actual</th>
+                            <th>Δ</th>
+                            <th>Status</th>
+                            <th style="min-width: 180px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for t in tasks %}
+                        <tr class="{% if t['status'] == 'completed' %}table-secondary{% endif %}">
+                            <td>
+                                <div class="fw-semibold mb-1">{{ t["title"] }}</div>
+
+                                <div class="d-flex flex-wrap gap-2 mb-1">
+                                    {% if t["is_overdue"] %}
+                                        <span class="badge text-bg-danger">Overdue</span>
+                                    {% elif t["is_due_today"] %}
+                                        <span class="badge text-bg-warning">Due today</span>
+                                    {% elif t["is_due_soon"] %}
+                                        <span class="badge text-bg-warning">Due soon</span>
+                                    {% endif %}
+
+                                    {% if t["risk"] and t["status"] != "completed" %}
+                                        {% if t["risk"]["late_risk"] == "high" or t["risk"]["overtime_risk"] == "high" %}
+                                            <span class="badge text-bg-danger">High risk</span>
+                                        {% elif t["risk"]["late_risk"] == "medium" or t["risk"]["overtime_risk"] == "medium" %}
+                                            <span class="badge text-bg-warning">Medium risk</span>
+                                        {% else %}
+                                            <span class="badge text-bg-success">Low risk</span>
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+
+                                <div class="small text-muted">
+                                    Deadline: {{ t["deadline"] }}
+                                    {% if t["days_left"] is not none and t["status"] != "completed" %}
+                                        ·
+                                        {% if t["days_left"] < 0 %}
+                                            {{ (-t["days_left"]) }} day(s) late
+                                        {% elif t["days_left"] == 0 %}
+                                            due today
+                                        {% elif t["days_left"] == 1 %}
+                                            1 day left
+                                        {% else %}
+                                            {{ t["days_left"] }} days left
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                            </td>
+
+                            <td>
+                                {% if t["priority"] == 3 %}
+                                    <span class="badge text-bg-danger">High</span>
+                                {% elif t["priority"] == 2 %}
+                                    <span class="badge text-bg-warning">Medium</span>
+                                {% else %}
+                                    <span class="badge text-bg-secondary">Low</span>
+                                {% endif %}
+                            </td>
+
+                            <td>{{ t["duration"] }} min</td>
+
+                            <td>
+                                {% if t["status"] == "completed" and t["actual_duration"] %}
+                                    {{ t["actual_duration"] }} min
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {% if t["status"] == "completed" and t["actual_duration"] %}
+                                    {% set delta = t["actual_duration"] - t["duration"] %}
+                                    {% if delta > 0 %}
+                                        <span class="badge text-bg-danger">+{{ delta }}</span>
+                                    {% elif delta < 0 %}
+                                        <span class="badge text-bg-success">{{ delta }}</span>
+                                    {% else %}
+                                        <span class="badge text-bg-secondary">0</span>
+                                    {% endif %}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {% if t["status"] == "completed" %}
+                                    <span class="badge text-bg-secondary">Completed</span>
+                                {% else %}
+                                    <span class="badge text-bg-success">Active</span>
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                <div class="d-flex flex-wrap gap-2">
+                                    {% if t["status"] != "completed" %}
+                                        <a href="/complete/{{ t['id'] }}" class="btn btn-success btn-sm">Complete</a>
+                                    {% endif %}
+
+                                    <form method="post" action="/delete/{{ t['id'] }}" class="d-inline">
+                                        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% else %}
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center py-5">
+            <h3 class="h5 mb-2">No tasks yet</h3>
+            <p class="text-muted mb-0">Add your first task to start building your daily workflow.</p>
+        </div>
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const priorityEl = document.getElementById("priority");
+  const deadlineEl = document.getElementById("deadline");
+  const durationEl = document.getElementById("duration");
+  const recTextEl = document.getElementById("recommendationText");
+  const riskTextEl = document.getElementById("riskText");
+  const useBtn = document.getElementById("useRecommendedBtn");
+  const usedRecommendationInput = document.getElementById("usedRecommendationInput");
+
+  let lastRecommended = null;
+
+  function resetRecommendationAppliedState() {
+    if (usedRecommendationInput) {
+      usedRecommendationInput.value = "0";
+    }
+    useBtn.textContent = "Use recommended";
+  }
+
+  async function refreshRecommendation() {
+    useBtn.textContent = "Use recommended";
+    useBtn.disabled = true;
+    riskTextEl.textContent = "";
+
+    const pr = priorityEl?.value;
+    const dl = deadlineEl?.value;
+    const pl = durationEl?.value;
+
+    if (!pr || !dl || !pl) {
+      recTextEl.textContent =
+        "Tip: enter Priority, Deadline and Duration to get a smart recommendation.";
+      lastRecommended = null;
+      if (usedRecommendationInput) {
+        usedRecommendationInput.value = "0";
+      }
+      return;
+    }
+
+    try {
+      const url = `/api/recommend?priority=${encodeURIComponent(pr)}&planned=${encodeURIComponent(pl)}&deadline=${encodeURIComponent(dl)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (!data.ok) {
+        recTextEl.textContent = "No recommendation available yet.";
+        lastRecommended = null;
+        if (usedRecommendationInput) {
+          usedRecommendationInput.value = "0";
+        }
+        return;
+      }
+
+      lastRecommended = data.recommended;
+      useBtn.disabled = false;
+
+      const mae =
+        (data.details && data.details.mae_min !== undefined)
+          ? data.details.mae_min
+          : "—";
+
+      recTextEl.textContent =
+        `Recommended duration: ${data.recommended} min (confidence: ${data.confidence}, MAE: ${mae}).`;
+
+      const riskUrl = `/api/risk?priority=${encodeURIComponent(pr)}&planned=${encodeURIComponent(pl)}&deadline=${encodeURIComponent(dl)}`;
+      const rres = await fetch(riskUrl);
+      const rdata = await rres.json();
+
+      if (rdata.ok) {
+        const badge = (lvl) => {
+          if (lvl === "high") return `<span class="badge text-bg-danger">HIGH</span>`;
+          if (lvl === "medium") return `<span class="badge text-bg-warning">MEDIUM</span>`;
+          return `<span class="badge text-bg-success">LOW</span>`;
+        };
+
+        const reasons =
+          (rdata.reasons || [])
+            .map(r => `<li>${r}</li>`)
+            .join("");
+
+        riskTextEl.innerHTML =
+          `Overtime risk: ${badge(rdata.overtime_risk)}
+           &nbsp; | &nbsp;
+           Late risk: ${badge(rdata.late_risk)}
+           <ul class="mb-0 mt-2">${reasons}</ul>`;
+      }
+
+    } catch (e) {
+      recTextEl.textContent = "Recommendation unavailable (server error).";
+      riskTextEl.textContent = "";
+      lastRecommended = null;
+      if (usedRecommendationInput) {
+        usedRecommendationInput.value = "0";
+      }
+    }
+  }
+
+  useBtn?.addEventListener("click", () => {
+    if (lastRecommended !== null) {
+      durationEl.value = lastRecommended;
+
+      if (usedRecommendationInput) {
+        usedRecommendationInput.value = "1";
+      }
+
+      useBtn.disabled = true;
+      useBtn.textContent = "Applied";
+
+      recTextEl.textContent =
+        `Recommendation applied: ${lastRecommended} min.`;
+    }
+  });
+
+  priorityEl?.addEventListener("input", () => {
+    resetRecommendationAppliedState();
+    refreshRecommendation();
+  });
+
+  deadlineEl?.addEventListener("change", () => {
+    resetRecommendationAppliedState();
+    refreshRecommendation();
+  });
+
+  durationEl?.addEventListener("input", () => {
+    resetRecommendationAppliedState();
+    refreshRecommendation();
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}Daily Planner · {{ app_name }}{% endblock %}
+{% block page_title %}Daily Planner{% endblock %}
+{% block page_subtitle %}Automatically generated workday timeline based on smart prioritization and task duration.{% endblock %}
+
+{% block content %}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body p-4">
+        <h3 class="h5 mb-3">Planner Settings</h3>
+
+        <form method="get" action="/planner" class="row g-3 align-items-end">
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">Start Time</label>
+                <input
+                    type="time"
+                    name="start_time"
+                    class="form-control"
+                    value="{{ planner_meta.start_time if planner_meta else '09:00' }}"
+                >
+            </div>
+
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">Available Minutes</label>
+                <input
+                    type="number"
+                    name="available_minutes"
+                    min="30"
+                    step="15"
+                    class="form-control"
+                    value="{{ planner_meta.available_minutes if planner_meta else 480 }}"
+                >
+            </div>
+
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">Break Minutes</label>
+                <input
+                    type="number"
+                    name="break_minutes"
+                    min="0"
+                    step="1"
+                    class="form-control"
+                    value="{{ planner_meta.break_minutes if planner_meta else 10 }}"
+                >
+            </div>
+
+            <div class="col-lg-2 col-md-6">
+                <div class="form-check mt-4">
+                    <input
+                        class="form-check-input"
+                        type="checkbox"
+                        name="use_predicted"
+                        value="1"
+                        id="usePredicted"
+                        {% if planner_meta and planner_meta.use_predicted %}checked{% endif %}
+                    >
+                    <label class="form-check-label" for="usePredicted">
+                        Use AI duration
+                    </label>
+                </div>
+            </div>
+
+            <div class="col-lg-1 col-md-12">
+                <button type="submit" class="btn btn-primary w-100">Generate</button>
+            </div>
+        </form>
+
+        {% if planner_meta %}
+            <div class="small text-muted mt-3">
+                Planning window: {{ planner_meta.start_time }} – {{ planner_meta.end_time }}
+                · Available: {{ planner_meta.available_minutes }} min
+                · Break: {{ planner_meta.break_minutes }} min
+                · AI duration: {% if planner_meta.use_predicted %}enabled{% else %}disabled{% endif %}
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if workload and workload.level != "none" %}
+    <div class="card border-0 shadow-sm mb-4 overload-card overload-{{ workload.level }}">
+        <div class="card-body p-4">
+            <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                <div>
+                    <h3 class="h5 mb-2">
+                        {% if workload.level == "high" %}
+                            Planner Overload Warning
+                        {% else %}
+                            Planner Workload Notice
+                        {% endif %}
+                    </h3>
+
+                    <div class="small text-muted mb-3">
+                        Utilization: {{ workload.utilization }}% ·
+                        Active tasks: {{ workload.active_count }} ·
+                        Urgent tasks: {{ workload.urgent_count }} ·
+                        High-risk tasks: {{ workload.risk_count }}
+                    </div>
+
+                    <ul class="mb-0">
+                        {% for warning in workload.warnings %}
+                            <li class="mb-2">{{ warning }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                <div>
+                    {% if workload.level == "high" %}
+                        <span class="badge text-bg-danger">High Pressure</span>
+                    {% else %}
+                        <span class="badge text-bg-warning">Monitor Workload</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+
+<div class="row g-4">
+    <div class="col-xl-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <strong>Scheduled Timeline</strong>
+                <span class="badge text-bg-primary">
+                    {{ planner_meta.start_time if planner_meta else "09:00" }}–{{ planner_meta.end_time if planner_meta else "17:00" }}
+                </span>
+            </div>
+
+            <div class="card-body p-4">
+                {% if schedule %}
+                    <div class="planner-timeline">
+                        {% for item in schedule %}
+                            <div class="timeline-item">
+                                <div class="timeline-time">
+                                    <div class="timeline-start">{{ item.start }}</div>
+                                    <div class="timeline-end">{{ item.end }}</div>
+                                </div>
+
+                                <div class="timeline-line">
+                                    <span class="timeline-dot
+                                        {% if item.priority == 3 %}priority-high
+                                        {% elif item.priority == 2 %}priority-medium
+                                        {% else %}priority-low
+                                        {% endif %}
+                                    "></span>
+                                </div>
+
+                                <div class="timeline-content">
+                                    <div class="task-block timeline-card
+                                        {% if item.priority == 3 %}timeline-high
+                                        {% elif item.priority == 2 %}timeline-medium
+                                        {% else %}timeline-low
+                                        {% endif %}
+                                    ">
+                                        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                                            <div>
+                                                <h4 class="h5 mb-2">{{ item.title }}</h4>
+
+                                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                                    {% if item.priority == 3 %}
+                                                        <span class="badge text-bg-danger">High Priority</span>
+                                                    {% elif item.priority == 2 %}
+                                                        <span class="badge text-bg-warning">Medium Priority</span>
+                                                    {% else %}
+                                                        <span class="badge text-bg-secondary">Low Priority</span>
+                                                    {% endif %}
+
+                                                    <span class="badge text-bg-primary">{{ item.duration }} min</span>
+
+                                                    {% if not item.used_recommendation and item.predicted_duration != item.planned_duration %}
+                                                        <span class="badge text-bg-warning">
+                                                            planned {{ item.planned_duration }} / predicted {{ item.predicted_duration }}
+                                                        </span>
+                                                    {% endif %}
+                                                </div>
+
+                                                <div class="timeline-meta">
+                                                    <span>Deadline: {{ item.deadline }}</span>
+                                                </div>
+                                            </div>
+
+                                            <div class="timeline-slot-summary">
+                                                <div class="small text-muted">Scheduled</div>
+                                                <div class="fw-semibold">{{ item.start }} - {{ item.end }}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="alert alert-info mb-0">
+                        No active tasks could be scheduled for the selected planning window.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-4">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header">
+                <strong>Unscheduled Tasks</strong>
+            </div>
+
+            <div class="card-body">
+                {% if unscheduled %}
+                    <div class="d-flex flex-column gap-3">
+                        {% for t in unscheduled %}
+                            <div class="task-block unscheduled-card">
+                                <div class="fw-semibold mb-2">{{ t["title"] }}</div>
+
+                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                    {% if t["priority"] == 3 %}
+                                        <span class="badge text-bg-danger">High</span>
+                                    {% elif t["priority"] == 2 %}
+                                        <span class="badge text-bg-warning">Medium</span>
+                                    {% else %}
+                                        <span class="badge text-bg-secondary">Low</span>
+                                    {% endif %}
+                                </div>
+
+                                <div class="small text-muted">
+                                    Planned: {{ t["planned_duration"] if t["planned_duration"] is defined else t["duration"] }} min
+                                </div>
+
+                                {% if t["predicted_duration"] is defined and (not t["used_recommendation"]) and t["predicted_duration"] != t["planned_duration"] %}
+                                    <div class="small text-muted">
+                                        Predicted: {{ t["predicted_duration"] }} min
+                                    </div>
+                                {% endif %}
+
+                                <div class="small text-muted">Deadline: {{ t["deadline"] }}</div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="alert alert-success mb-0">
+                        All active tasks fit into the selected planning window.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header">
+                <strong>Planning Rules</strong>
+            </div>
+
+            <div class="card-body">
+                <ul class="mb-0">
+                    <li>Start time is user-defined</li>
+                    <li>Available time is user-defined</li>
+                    <li>Break between tasks is configurable</li>
+                    <li>AI-based duration can be enabled or disabled</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
