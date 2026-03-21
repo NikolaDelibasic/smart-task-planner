@@ -1,100 +1,91 @@
 # Smart Task Planner
 
-Smart Task Planner is an intelligent task management web application that helps users organize, prioritize, and optimize their daily workload using algorithmic scheduling and predictive analysis.
+Smart Task Planner is a web application for organizing and managing daily tasks with a focus on prioritization, time estimation, and productivity tracking.
 
-The system goes beyond basic task tracking by introducing AI-inspired recommendations, risk analysis, and automatic scheduling.
+The main goal of the project is to help users better understand how they spend their time and improve planning through simple predictive logic and automated scheduling.
 
 ---
 
-## 🚀 Key Features
+## Overview
 
-### 🧠 Smart Duration Recommendation
-- Predicts realistic task duration based on priority and deadline
-- Continuously improves as more tasks are completed
-- Displays confidence and model accuracy (MAE)
+This application allows users to create, track, and complete tasks while the system assists with:
 
-### ⚠️ Risk Analysis System
-- Detects:
-  - Overtime risk
-  - Deadline risk
-- Provides explanations for each prediction
+- suggesting realistic task durations
+- identifying potential risks (late completion or overtime)
+- generating a daily plan based on available time
 
-### 📅 Automatic Daily Planner
-- Generates optimal schedule for the day
-- Respects:
-  - task priority
+It is designed as a practical productivity tool, but also as an example of how basic algorithms and data analysis can be applied to real-world problems.
+
+---
+
+## Features
+
+### Task Management
+- Add, delete, and complete tasks
+- Define priority, deadline, and expected duration
+- Track actual time spent on each task
+
+### Smart Recommendations
+- Suggests adjusted task duration based on input data
+- Provides a confidence indicator and error estimate
+
+### Risk Analysis
+- Detects possible issues such as:
+  - running out of time
+  - missing deadlines
+- Gives simple explanations for each warning
+
+### Daily Planner
+- Automatically creates a schedule for the day
+- Takes into account:
+  - priority
   - deadlines
-  - duration
-- Supports:
-  - custom start time
-  - available work time
+  - available working time
+- Allows customization:
+  - start time
+  - total available minutes
   - break duration
-  - optional AI-based scheduling
 
-### 📊 Productivity & Statistics
-- Completion rate
-- Planning accuracy
-- Productivity score (0–100)
-- Overtime vs undertime tracking
-- Task distribution by priority
-
-### 📈 Visual Analytics
-- Planned vs Actual time chart
-- Task completion trends
-
-### 🚨 Workload Analysis
-- Detects overload situations
-- Shows smart warnings like:
-  - “Too many tasks for today”
-  - “High risk of missing deadlines”
+### Statistics
+- Total and completed tasks
+- Planned vs actual time
+- Productivity score
+- Overtime and undertime tracking
 
 ---
 
-## ⚙️ How It Works
+## How It Works
 
-The system combines rule-based scheduling with data-driven predictions:
+Tasks are sorted using a simple prioritization strategy:
 
-### Task Prioritization
-Tasks are sorted by:
-1. Priority (descending)
-2. Deadline (ascending)
-3. Duration (ascending)
+1. Higher priority first  
+2. Earlier deadline first  
+3. Shorter tasks first  
 
-### Duration Prediction
-A lightweight predictive model estimates realistic task duration based on historical performance.
+The system uses past task data to slightly adjust future duration estimates.  
+Risk analysis is based on comparing task duration with time remaining until the deadline.
 
-### Risk Detection
-Risk is calculated using:
-- time remaining until deadline
-- task duration
-- priority level
-
-### Scheduling Algorithm
-The planner:
-- fills available time blocks
-- inserts breaks
-- skips tasks that exceed daily capacity
+The daily planner fills the available time window and skips tasks that do not fit.
 
 ---
 
-## 🛠 Tech Stack
+## Technologies Used
 
-- **Backend:** Python (Flask)
-- **Database:** SQLite
-- **Frontend:** HTML, CSS, Bootstrap
-- **Charts:** Chart.js
-- **Architecture:** Modular (core / web separation)
+- Python (Flask)
+- SQLite
+- HTML / CSS (Bootstrap)
+- Chart.js (for basic visualizations)
 
 ---
 
-## ▶️ Installation
+## Installation
 
 ```bash
-git clone <your-repo>
+git clone https://github.com/NikolaDelibasic/smart-task-planner.git
 cd smart-task-planner
 
 python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
+source venv/bin/activate   # Windows: venv\Scripts\activate
 
 pip install flask
 
