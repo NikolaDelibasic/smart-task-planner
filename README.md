@@ -4,8 +4,6 @@ Adaptive task planning system with predictive modeling, risk analysis, and dynam
 
 ---
 
-## English
-
 ### Overview
 
 Smart Task Planner is an adaptive web application designed to help users organize, prioritize, and optimize their daily tasks using data-driven logic.
