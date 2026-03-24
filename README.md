@@ -1,84 +1,128 @@
 # Smart Task Planner
 
-Smart Task Planner is a web application for organizing and managing daily tasks with a focus on prioritization, time estimation, and productivity tracking.
-
-The main goal of the project is to help users better understand how they spend their time and improve planning through simple predictive logic and automated scheduling.
+Adaptive task planning system with predictive modeling, risk analysis, and dynamic scheduling.
 
 ---
 
-## Overview
+## English
 
-This application allows users to create, track, and complete tasks while the system assists with:
+### Overview
 
-- suggesting realistic task durations
-- identifying potential risks (late completion or overtime)
-- generating a daily plan based on available time
+Smart Task Planner is an adaptive web application designed to help users organize, prioritize, and optimize their daily tasks using data-driven logic.
 
-It is designed as a practical productivity tool, but also as an example of how basic algorithms and data analysis can be applied to real-world problems.
+Unlike traditional task managers, the system evolves over time by learning from user behavior and improving its predictions and planning decisions.
 
 ---
 
-## Features
+### Features
 
-### Task Management
+#### Task Management
 - Add, delete, and complete tasks
-- Define priority, deadline, and expected duration
-- Track actual time spent on each task
+- Define priority, deadline, and duration
+- Track actual time spent
+- Automatic ordering (active first, completed below)
 
-### Smart Recommendations
-- Suggests adjusted task duration based on input data
-- Provides a confidence indicator and error estimate
+---
 
-### Risk Analysis
-- Detects possible issues such as:
-  - running out of time
-  - missing deadlines
-- Gives simple explanations for each warning
-
-### Daily Planner
-- Automatically creates a schedule for the day
-- Takes into account:
-  - priority
+#### AI Memory
+- Stores completed tasks in `task_history`
+- Preserves data even after deletion
+- Tracks:
+  - planned vs actual duration
   - deadlines
-  - available working time
-- Allows customization:
-  - start time
-  - total available minutes
-  - break duration
-
-### Statistics
-- Total and completed tasks
-- Planned vs actual time
-- Productivity score
-- Overtime and undertime tracking
+  - completion timestamps
 
 ---
 
-## How It Works
-
-Tasks are sorted using a simple prioritization strategy:
-
-1. Higher priority first  
-2. Earlier deadline first  
-3. Shorter tasks first  
-
-The system uses past task data to slightly adjust future duration estimates.  
-Risk analysis is based on comparing task duration with time remaining until the deadline.
-
-The daily planner fills the available time window and skips tasks that do not fit.
+#### Duration Prediction
+- Uses:
+  - historical data (ridge regression)
+  - fallback heuristics (cold start)
+- Outputs:
+  - recommended duration
+  - confidence level
+  - MAE (mean absolute error)
 
 ---
 
-## Technologies Used
+#### Risk Analysis
+- Detects:
+  - overtime risk
+  - late completion risk
+- Based on:
+  - user history
+  - workload
+  - deadline proximity
+  - task size
+- Includes feasibility checks for unrealistic tasks
+
+---
+
+#### Daily Planner
+- Automatic scheduling system
+- Supports:
+  - multiple time blocks
+  - custom start time
+  - breaks
+- Includes task splitting for large tasks
+
+---
+
+#### Statistics
+- Based on historical data
+- Metrics:
+  - planning accuracy
+  - productivity score
+  - estimation error
+- Provides behavioral insights
+
+---
+
+### How It Works
+
+#### Task Prioritization
+1. Priority (descending)
+2. Deadline (earliest first)
+3. Duration (shortest first)
+
+---
+
+#### Prediction Model
+Ridge regression model using:
+- planned duration
+- priority
+- deadline proximity
+- weekend indicator
+
+Fallback: rule-based estimation
+
+---
+
+#### Risk Model
+Combines:
+- historical behavior
+- workload pressure
+- time constraints
+
+---
+
+#### Scheduler
+- fills available time blocks
+- splits large tasks
+- respects breaks
+
+---
+
+### Technologies
 
 - Python (Flask)
 - SQLite
 - HTML / CSS (Bootstrap)
-- Chart.js (for basic visualizations)
+- Chart.js
 
 ---
 
-## Installation
+### Installation
 
 ```bash
 git clone https://github.com/NikolaDelibasic/smart-task-planner.git
