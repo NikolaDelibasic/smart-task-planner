@@ -18,7 +18,6 @@ def _build_insights(stats: dict) -> list[str]:
     total_overtime = stats["total_overtime"]
     total_undertime = stats["total_undertime"]
 
-    # 1. Avg delta insight
     if avg_delta is not None:
         if avg_delta > 5:
             insights.append(f"You usually underestimate tasks by about {abs(avg_delta)} minutes.")
@@ -27,7 +26,6 @@ def _build_insights(stats: dict) -> list[str]:
         else:
             insights.append("Your time estimates are generally close to actual task duration.")
 
-    # 2. Planning accuracy insight
     if planning_accuracy is not None:
         if planning_accuracy >= 90:
             insights.append("Your planning accuracy is high.")
@@ -36,7 +34,6 @@ def _build_insights(stats: dict) -> list[str]:
         else:
             insights.append("Your planning accuracy is relatively low, which suggests task durations need adjustment.")
 
-    # 3. Productivity score insight
     if productivity_score >= 85:
         insights.append("Your current productivity score indicates very strong execution consistency.")
     elif productivity_score >= 70:
@@ -44,7 +41,6 @@ def _build_insights(stats: dict) -> list[str]:
     else:
         insights.append("Your current productivity score suggests inconsistent execution compared to the plan.")
 
-    # 4. Priority insight
     if completed_by_priority:
         top_priority = max(completed_by_priority, key=completed_by_priority.get)
         if top_priority == 3:
@@ -54,19 +50,16 @@ def _build_insights(stats: dict) -> list[str]:
         else:
             insights.append("Most of your completed tasks are low-priority tasks.")
 
-    # 5. Workload / backlog insight
     if active >= 8:
         insights.append("You currently have a large active backlog, which may increase scheduling pressure.")
     elif active == 0 and total > 0:
         insights.append("You currently have no active tasks, which means your backlog is fully cleared.")
 
-    # 6. Overtime vs undertime insight
     if total_overtime > total_undertime + 20:
         insights.append("You spend significantly more extra time on tasks than you save.")
     elif total_undertime > total_overtime + 20:
         insights.append("You tend to complete tasks faster than planned more often than you exceed time.")
 
-    # Keep it compact
     return insights[:5]
 
 
@@ -75,11 +68,12 @@ def get_basic_stats():
         cur = conn.cursor()
         stats = {}
 
+        # === CURRENT BOARD STATE (tasks) ===
         cur.execute("SELECT COUNT(*) AS count FROM tasks")
         stats["total"] = cur.fetchone()["count"]
 
         cur.execute("SELECT COUNT(*) AS count FROM tasks WHERE status = 'completed'")
-        stats["completed"] = cur.fetchone()["count"]
+        stats["current_completed"] = cur.fetchone()["count"]
 
         cur.execute("SELECT COUNT(*) AS count FROM tasks WHERE status != 'completed'")
         stats["active"] = cur.fetchone()["count"]
@@ -87,31 +81,34 @@ def get_basic_stats():
         cur.execute("SELECT COALESCE(SUM(duration), 0) AS total_time FROM tasks")
         stats["total_time"] = cur.fetchone()["total_time"]
 
+        # === LONG-TERM LEARNING / ANALYTICS (task_history) ===
+        cur.execute("SELECT COUNT(*) AS count FROM task_history")
+        stats["completed"] = cur.fetchone()["count"]
+
         cur.execute("""
-            SELECT COALESCE(SUM(duration), 0) AS completed_time
-            FROM tasks
-            WHERE status = 'completed'
+            SELECT COALESCE(SUM(planned_duration), 0) AS completed_time
+            FROM task_history
         """)
         stats["completed_time"] = cur.fetchone()["completed_time"]
 
         cur.execute("""
             SELECT COALESCE(SUM(actual_duration), 0) AS actual_completed_time
-            FROM tasks
-            WHERE status = 'completed'
+            FROM task_history
+            WHERE actual_duration IS NOT NULL
         """)
         stats["actual_completed_time"] = cur.fetchone()["actual_completed_time"]
 
         cur.execute("""
-            SELECT COALESCE(SUM(actual_duration - duration), 0) AS total_delta
-            FROM tasks
-            WHERE status = 'completed' AND actual_duration IS NOT NULL
+            SELECT COALESCE(SUM(actual_duration - planned_duration), 0) AS total_delta
+            FROM task_history
+            WHERE actual_duration IS NOT NULL
         """)
         stats["total_delta"] = cur.fetchone()["total_delta"]
 
         cur.execute("""
-            SELECT AVG(actual_duration - duration) AS avg_delta
-            FROM tasks
-            WHERE status = 'completed' AND actual_duration IS NOT NULL
+            SELECT AVG(actual_duration - planned_duration) AS avg_delta
+            FROM task_history
+            WHERE actual_duration IS NOT NULL
         """)
         avg = cur.fetchone()["avg_delta"]
         stats["avg_delta"] = round(avg, 1) if avg is not None else None
@@ -119,33 +116,32 @@ def get_basic_stats():
         cur.execute("""
             SELECT COALESCE(SUM(
                 CASE
-                    WHEN (actual_duration - duration) > 0
-                    THEN (actual_duration - duration)
+                    WHEN (actual_duration - planned_duration) > 0
+                    THEN (actual_duration - planned_duration)
                     ELSE 0
                 END
             ), 0) AS total_overtime
-            FROM tasks
-            WHERE status = 'completed' AND actual_duration IS NOT NULL
+            FROM task_history
+            WHERE actual_duration IS NOT NULL
         """)
         stats["total_overtime"] = cur.fetchone()["total_overtime"]
 
         cur.execute("""
             SELECT COALESCE(SUM(
                 CASE
-                    WHEN (actual_duration - duration) < 0
-                    THEN -(actual_duration - duration)
+                    WHEN (actual_duration - planned_duration) < 0
+                    THEN -(actual_duration - planned_duration)
                     ELSE 0
                 END
             ), 0) AS total_undertime
-            FROM tasks
-            WHERE status = 'completed' AND actual_duration IS NOT NULL
+            FROM task_history
+            WHERE actual_duration IS NOT NULL
         """)
         stats["total_undertime"] = cur.fetchone()["total_undertime"]
 
         cur.execute("""
             SELECT priority, COUNT(*) AS count
-            FROM tasks
-            WHERE status = 'completed'
+            FROM task_history
             GROUP BY priority
             ORDER BY priority ASC
         """)

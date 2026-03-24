@@ -32,18 +32,19 @@ def _days_to_deadline(deadline_str: str) -> int:
     return (deadline_date - today).days
 
 
-def _get_training_rows(limit: int = 500) -> List[Tuple[int, int, str, int]]:
+def _get_training_rows(limit: int = 500):
     """
     Returns rows:
     (priority, planned_duration, deadline, actual_duration)
     """
+    from core.database import get_connection
+
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT priority, duration, deadline, actual_duration
-            FROM tasks
-            WHERE status = 'completed'
-              AND actual_duration IS NOT NULL
+            SELECT priority, planned_duration, deadline, actual_duration
+            FROM task_history
+            WHERE actual_duration IS NOT NULL
             ORDER BY id DESC
             LIMIT ?
         """, (limit,))
@@ -53,7 +54,7 @@ def _get_training_rows(limit: int = 500) -> List[Tuple[int, int, str, int]]:
     for row in rows:
         out.append((
             int(row["priority"]),
-            int(row["duration"]),
+            int(row["planned_duration"]),
             str(row["deadline"]),
             int(row["actual_duration"])
         ))

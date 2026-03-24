@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 from core.database import get_connection
 from core.predictor import recommend_duration
@@ -22,12 +22,12 @@ def _clamp01(x: float) -> float:
 
 
 def _days_until(deadline_str: str) -> int:
-    d = date.fromisoformat(deadline_str[:10])
+    d = date.fromisoformat(str(deadline_str)[:10])
     return (d - date.today()).days
 
 
 def _is_weekend_deadline(deadline_str: str) -> bool:
-    d = date.fromisoformat(deadline_str[:10])
+    d = date.fromisoformat(str(deadline_str)[:10])
     return d.weekday() >= 5
 
 
@@ -56,7 +56,8 @@ def _get_active_backlog_predicted_minutes(exclude_deadline: str | None = None) -
         cur.execute("""
             SELECT COALESCE(SUM(duration), 0)
             FROM tasks
-            WHERE status != 'completed' AND substr(deadline,1,10) <= substr(?,1,10)
+            WHERE status != 'completed'
+              AND substr(deadline, 1, 10) <= substr(?, 1, 10)
         """, (exclude_deadline,))
     else:
         cur.execute("""
@@ -64,6 +65,7 @@ def _get_active_backlog_predicted_minutes(exclude_deadline: str | None = None) -
             FROM tasks
             WHERE status != 'completed'
         """)
+
     s = cur.fetchone()[0] or 0
     conn.close()
     return int(s)
@@ -76,22 +78,24 @@ def _historical_overtime_rate(priority: int) -> float:
     def rate_for(where_clause: str, params: Tuple) -> Tuple[int, float]:
         cur.execute(f"""
             SELECT COUNT(*)
-            FROM tasks
-            WHERE status='completed' AND actual_duration IS NOT NULL {where_clause}
+            FROM task_history
+            WHERE actual_duration IS NOT NULL
+              {where_clause}
         """, params)
         total = cur.fetchone()[0] or 0
 
         cur.execute(f"""
             SELECT COUNT(*)
-            FROM tasks
-            WHERE status='completed' AND actual_duration IS NOT NULL
-              AND actual_duration > duration {where_clause}
+            FROM task_history
+            WHERE actual_duration IS NOT NULL
+              AND actual_duration > planned_duration
+              {where_clause}
         """, params)
         over = cur.fetchone()[0] or 0
 
         return int(total), (float(over) / float(total)) if total else 0.0
 
-    n_pr, r_pr = rate_for("AND priority=?", (int(priority),))
+    n_pr, r_pr = rate_for("AND priority = ?", (int(priority),))
     if n_pr >= 8:
         conn.close()
         return r_pr
@@ -108,9 +112,8 @@ def _historical_late_rate(priority: int) -> float:
     def rate_for(where_clause: str, params: Tuple) -> Tuple[int, float]:
         cur.execute(f"""
             SELECT COUNT(*)
-            FROM tasks
-            WHERE status='completed'
-              AND completed_at IS NOT NULL
+            FROM task_history
+            WHERE completed_at IS NOT NULL
               AND deadline IS NOT NULL
               {where_clause}
         """, params)
@@ -118,18 +121,17 @@ def _historical_late_rate(priority: int) -> float:
 
         cur.execute(f"""
             SELECT COUNT(*)
-            FROM tasks
-            WHERE status='completed'
-              AND completed_at IS NOT NULL
+            FROM task_history
+            WHERE completed_at IS NOT NULL
               AND deadline IS NOT NULL
-              AND date(substr(completed_at,1,10)) > date(substr(deadline,1,10))
+              AND date(substr(completed_at, 1, 10)) > date(substr(deadline, 1, 10))
               {where_clause}
         """, params)
         late = cur.fetchone()[0] or 0
 
         return int(total), (float(late) / float(total)) if total else 0.0
 
-    n_pr, r_pr = rate_for("AND priority=?", (int(priority),))
+    n_pr, r_pr = rate_for("AND priority = ?", (int(priority),))
     if n_pr >= 8:
         conn.close()
         return r_pr
@@ -142,6 +144,7 @@ def _historical_late_rate(priority: int) -> float:
 def assess_risk(priority: int, planned: int, deadline: str) -> RiskResult:
     priority = int(priority)
     planned = int(planned)
+    deadline = str(deadline).strip()
 
     reasons: List[str] = []
 
@@ -158,7 +161,6 @@ def assess_risk(priority: int, planned: int, deadline: str) -> RiskResult:
 
     # === OVERTIME ===
     over_ratio = (predicted - planned) / max(1.0, float(planned))
-
     p_over = 0.6 * overtime_rate + 0.4 * _clamp01(0.3 + over_ratio)
 
     if weekend:
@@ -166,15 +168,45 @@ def assess_risk(priority: int, planned: int, deadline: str) -> RiskResult:
 
     # === LATE ===
     daily_capacity = 240
-    capacity = max(0, days_left) * daily_capacity
-    workload = backlog_minutes + predicted
+    capacity_before_deadline = max(0, days_left) * daily_capacity
+    workload_before_deadline = backlog_minutes + predicted
 
-    pressure = (workload - capacity) / max(1.0, float(daily_capacity))
+    pressure = (workload_before_deadline - capacity_before_deadline) / max(1.0, float(daily_capacity))
     p_late = 0.6 * late_rate + 0.4 * _clamp01(0.3 + 0.2 * pressure)
+
+    # === HARD FEASIBILITY CHECK ===
+    if days_left >= 0:
+        total_available_minutes = max(1, days_left + 1) * daily_capacity
+
+        if predicted > total_available_minutes:
+            p_late = 0.95
+            reasons.append(
+                f"Task requires about {predicted} min, but only about {total_available_minutes} min remain until deadline."
+            )
+        elif predicted > total_available_minutes * 0.75:
+            p_late = max(p_late, 0.7)
+            reasons.append("Task is very large relative to the remaining time window.")
 
     if days_left < 0:
         p_late = 0.95
         reasons.append("Deadline is already in the past.")
+
+    # === EASY / LOW-PRESSURE CASE REDUCTION ===
+    if (
+        days_left >= 1
+        and backlog_count == 0
+        and backlog_minutes == 0
+        and predicted <= 45
+    ):
+        p_late = min(p_late, 0.20)
+
+    elif (
+        days_left >= 1
+        and backlog_count <= 2
+        and backlog_minutes <= 60
+        and predicted <= 30
+    ):
+        p_late = min(p_late, 0.25)
 
     # === SMART REDUCTION (LOW CASE) ===
     if abs(predicted - planned) < 5 and days_left > 2 and backlog_count < 5:
@@ -189,13 +221,13 @@ def assess_risk(priority: int, planned: int, deadline: str) -> RiskResult:
         reasons.append("You often exceed planned time for similar tasks.")
 
     if days_left <= 1:
-        reasons.append("Very little time left until deadline.")
+        reasons.append("Very little time is left until the deadline.")
 
-    if workload > capacity:
-        reasons.append("Workload before deadline may exceed available time.")
+    if workload_before_deadline > capacity_before_deadline:
+        reasons.append("Workload before the deadline may exceed available capacity.")
 
     if backlog_count >= 10:
-        reasons.append("Large active backlog increases delay risk.")
+        reasons.append("A large active backlog increases delay risk.")
 
     return RiskResult(
         overtime_risk=_risk_bucket(p_over),

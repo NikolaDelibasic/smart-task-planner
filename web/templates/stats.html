@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 
 {% block title %}Statistics · {{ app_name }}{% endblock %}
-{% block page_title %}Efficiency Statistics{% endblock %}
-{% block page_subtitle %}Track productivity, execution accuracy, and time performance across your tasks.{% endblock %}
+{% block page_title %}Statistics & AI Insights{% endblock %}
+{% block page_subtitle %}Track current workload, historical execution quality, and long-term planning behavior.{% endblock %}
 
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -11,6 +11,17 @@
 {% block content %}
 
 {% set score = stats.productivity_score or 0 %}
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body p-4">
+        <h3 class="h5 mb-2">How to read these statistics</h3>
+        <p class="text-muted mb-0">
+            This page combines two layers of data:
+            <strong>current board state</strong> (your active and current tasks)
+            and <strong>historical AI memory</strong> (completed-task history used for learning, prediction, and accuracy analysis).
+        </p>
+    </div>
+</div>
 
 <div class="row g-3 mb-4">
     <div class="col-xl-4">
@@ -34,7 +45,7 @@
             </div>
 
             <div class="metric-sub mt-3">
-                Based on how close actual task durations are to the original plan.
+                Based on historical difference between planned and actual task duration.
             </div>
         </div>
     </div>
@@ -50,7 +61,7 @@
                 {% endif %}
             </div>
             <div class="metric-sub">
-                Ratio between planned completed time and actual completed time.
+                Historical ratio between planned completed time and actual completed time.
             </div>
         </div>
     </div>
@@ -60,72 +71,105 @@
             <div class="metric-label">Completion Rate</div>
             <div class="metric-value">{{ stats.completion_rate }}<span class="fs-6 text-muted">%</span></div>
             <div class="metric-sub">
-                Percentage of finished tasks out of all recorded tasks.
+                Historical completions compared to the number of tasks currently on the board.
             </div>
         </div>
     </div>
 </div>
 
-<div class="row g-3">
-    <div class="col-lg-3 col-md-6">
-        <div class="card metric-card">
-            <div class="metric-label">Total tasks</div>
-            <div class="metric-value">{{ stats.total }}</div>
-        </div>
-    </div>
+<div class="section-spacer"></div>
 
-    <div class="col-lg-3 col-md-6">
-        <div class="card metric-card">
-            <div class="metric-label">Completed</div>
-            <div class="metric-value">{{ stats.completed }}</div>
-        </div>
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header">
+        <strong>Current Board State</strong>
     </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-3 col-md-6">
+                <div class="card metric-card h-100">
+                    <div class="metric-label">Current tasks</div>
+                    <div class="metric-value">{{ stats.total }}</div>
+                    <div class="metric-sub">Tasks currently stored on the board.</div>
+                </div>
+            </div>
 
-    <div class="col-lg-3 col-md-6">
-        <div class="card metric-card">
-            <div class="metric-label">Active</div>
-            <div class="metric-value">{{ stats.active }}</div>
-        </div>
-    </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="card metric-card h-100">
+                    <div class="metric-label">Current completed</div>
+                    <div class="metric-value">{{ stats.current_completed }}</div>
+                    <div class="metric-sub">Completed tasks still present on the board.</div>
+                </div>
+            </div>
 
-    <div class="col-lg-3 col-md-6">
-        <div class="card metric-card">
-            <div class="metric-label">Average Δ</div>
-            <div class="metric-value">
-                {% if stats.avg_delta is not none %}
-                    {% if stats.avg_delta > 0 %}
-                        <span class="text-danger">+{{ stats.avg_delta }}</span>
-                    {% elif stats.avg_delta < 0 %}
-                        <span class="text-success">{{ stats.avg_delta }}</span>
-                    {% else %}
-                        {{ stats.avg_delta }}
-                    {% endif %}
-                    <span class="fs-6 text-muted"> min</span>
-                {% else %}
-                    —
-                {% endif %}
+            <div class="col-lg-3 col-md-6">
+                <div class="card metric-card h-100">
+                    <div class="metric-label">Active</div>
+                    <div class="metric-value">{{ stats.active }}</div>
+                    <div class="metric-sub">Tasks that still need to be worked on.</div>
+                </div>
+            </div>
+
+            <div class="col-lg-3 col-md-6">
+                <div class="card metric-card h-100">
+                    <div class="metric-label">Current planned time</div>
+                    <div class="metric-value">{{ stats.total_time }}<span class="fs-6 text-muted"> min</span></div>
+                    <div class="metric-sub">Total planned time for tasks currently on the board.</div>
+                </div>
             </div>
         </div>
     </div>
+</div>
 
-    <div class="col-lg-4 col-md-6">
-        <div class="card metric-card">
-            <div class="metric-label">Total planned time</div>
-            <div class="metric-value">{{ stats.total_time }}<span class="fs-6 text-muted"> min</span></div>
-        </div>
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header">
+        <strong>Historical AI Memory</strong>
     </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-3 col-md-6">
+                <div class="card metric-card h-100">
+                    <div class="metric-label">History samples</div>
+                    <div class="metric-value">{{ stats.completed }}</div>
+                    <div class="metric-sub">Completed tasks stored in long-term memory.</div>
+                </div>
+            </div>
 
-    <div class="col-lg-4 col-md-6">
-        <div class="card metric-card">
-            <div class="metric-label">Planned time (completed)</div>
-            <div class="metric-value">{{ stats.completed_time }}<span class="fs-6 text-muted"> min</span></div>
-        </div>
-    </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="card metric-card h-100">
+                    <div class="metric-label">Average Δ</div>
+                    <div class="metric-value">
+                        {% if stats.avg_delta is not none %}
+                            {% if stats.avg_delta > 0 %}
+                                <span class="text-danger">+{{ stats.avg_delta }}</span>
+                            {% elif stats.avg_delta < 0 %}
+                                <span class="text-success">{{ stats.avg_delta }}</span>
+                            {% else %}
+                                {{ stats.avg_delta }}
+                            {% endif %}
+                            <span class="fs-6 text-muted"> min</span>
+                        {% else %}
+                            —
+                        {% endif %}
+                    </div>
+                    <div class="metric-sub">Average historical difference: actual minus planned.</div>
+                </div>
+            </div>
 
-    <div class="col-lg-4 col-md-12">
-        <div class="card metric-card">
-            <div class="metric-label">Actual time (completed)</div>
-            <div class="metric-value">{{ stats.actual_completed_time }}<span class="fs-6 text-muted"> min</span></div>
+            <div class="col-lg-3 col-md-6">
+                <div class="card metric-card h-100">
+                    <div class="metric-label">Planned time (history)</div>
+                    <div class="metric-value">{{ stats.completed_time }}<span class="fs-6 text-muted"> min</span></div>
+                    <div class="metric-sub">Total planned time across completed history.</div>
+                </div>
+            </div>
+
+            <div class="col-lg-3 col-md-6">
+                <div class="card metric-card h-100">
+                    <div class="metric-label">Actual time (history)</div>
+                    <div class="metric-value">{{ stats.actual_completed_time }}<span class="fs-6 text-muted"> min</span></div>
+                    <div class="metric-sub">Total actual time recorded for completed history.</div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -146,7 +190,7 @@
                 {% endif %}
                 <span class="fs-6 text-muted"> min</span>
             </div>
-            <div class="metric-sub">Actual − Planned</div>
+            <div class="metric-sub">Historical actual minus planned time.</div>
         </div>
     </div>
 
@@ -154,7 +198,7 @@
         <div class="card metric-card">
             <div class="metric-label">Total overtime</div>
             <div class="metric-value text-danger">{{ stats.total_overtime }}<span class="fs-6 text-muted"> min</span></div>
-            <div class="metric-sub">Positive time overruns</div>
+            <div class="metric-sub">Extra time spent above plan across history.</div>
         </div>
     </div>
 
@@ -162,7 +206,7 @@
         <div class="card metric-card">
             <div class="metric-label">Total undertime</div>
             <div class="metric-value text-success">{{ stats.total_undertime }}<span class="fs-6 text-muted"> min</span></div>
-            <div class="metric-sub">Saved time vs plan</div>
+            <div class="metric-sub">Time saved compared to plan across history.</div>
         </div>
     </div>
 
@@ -172,7 +216,7 @@
             <div class="metric-value fs-4">
                 <span class="badge text-bg-{{ stats.score_color }}">{{ stats.score_label }}</span>
             </div>
-            <div class="metric-sub">Overall planning quality indicator</div>
+            <div class="metric-sub">Overall historical planning quality indicator.</div>
         </div>
     </div>
 </div>
@@ -191,7 +235,7 @@
                 {% endfor %}
             </ul>
         {% else %}
-            <p class="text-muted mb-0">Not enough data yet to generate insights.</p>
+            <p class="text-muted mb-0">Not enough historical data yet to generate AI insights.</p>
         {% endif %}
     </div>
 </div>
@@ -200,24 +244,14 @@
     <div class="col-xl-4">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header">
-                <strong>Task Status Distribution</strong>
+                <strong>Current Status Distribution</strong>
             </div>
             <div class="card-body">
                 <div class="chart-wrap">
                     <canvas id="statusChart"></canvas>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="col-xl-4">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-header">
-                <strong>Planned vs Actual Time</strong>
-            </div>
-            <div class="card-body">
-                <div class="chart-wrap">
-                    <canvas id="timeChart"></canvas>
+                <div class="small text-muted mt-3">
+                    Based on tasks currently visible on the board.
                 </div>
             </div>
         </div>
@@ -226,11 +260,30 @@
     <div class="col-xl-4">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header">
-                <strong>Overtime vs Undertime</strong>
+                <strong>Historical Planned vs Actual Time</strong>
+            </div>
+            <div class="card-body">
+                <div class="chart-wrap">
+                    <canvas id="timeChart"></canvas>
+                </div>
+                <div class="small text-muted mt-3">
+                    Based on completed tasks stored in AI memory.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header">
+                <strong>Historical Overtime vs Undertime</strong>
             </div>
             <div class="card-body">
                 <div class="chart-wrap">
                     <canvas id="deltaChart"></canvas>
+                </div>
+                <div class="small text-muted mt-3">
+                    Shows whether you usually overrun or save time versus the plan.
                 </div>
             </div>
         </div>
@@ -241,7 +294,7 @@
 
 <div class="card border-0 shadow-sm">
     <div class="card-header">
-        <strong>Completed Tasks by Priority</strong>
+        <strong>Historical Completed Tasks by Priority</strong>
     </div>
     <div class="card-body p-0">
         <ul class="list-group list-group-flush">
@@ -278,7 +331,7 @@
         new Chart(statusCtx, {
             type: "doughnut",
             data: {
-                labels: ["Completed", "Active"],
+                labels: ["Historical Completed", "Active Now"],
                 datasets: [{
                     data: [{{ stats.completed }}, {{ stats.active }}],
                     backgroundColor: [
@@ -310,7 +363,7 @@
         new Chart(timeCtx, {
             type: "bar",
             data: {
-                labels: ["Completed Planned", "Completed Actual"],
+                labels: ["Historical Planned", "Historical Actual"],
                 datasets: [{
                     label: "Minutes",
                     data: [{{ stats.completed_time }}, {{ stats.actual_completed_time }}],

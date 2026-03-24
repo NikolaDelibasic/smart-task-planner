@@ -85,8 +85,9 @@
     </div>
 </div>
 
+<div id="workloadSection">
 {% if workload and workload.level != "none" %}
-    <div class="card border-0 shadow-sm mb-4 overload-card overload-{{ workload.level }}">
+    <div class="card border-0 shadow-sm mb-4 overload-card overload-{{ workload.level }}" id="workloadCard">
         <div class="card-body p-4">
             <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
                 <div>
@@ -123,9 +124,10 @@
         </div>
     </div>
 {% endif %}
+</div>
 
 {% if tasks %}
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm" id="taskListCard">
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table align-middle mb-0">
@@ -140,9 +142,18 @@
                             <th style="min-width: 180px;">Actions</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="tasksTableBody">
                     {% for t in tasks %}
-                        <tr class="{% if t['status'] == 'completed' %}table-secondary{% endif %}">
+                        <tr
+                            data-task-row
+                            data-task-id="{{ t['id'] }}"
+                            data-task-title="{{ t['title'] }}"
+                            data-task-duration="{{ t['duration'] }}"
+                            data-task-created-at="{{ t['created_at'] or '' }}"
+                            data-task-completed-at="{{ t['completed_at'] or '' }}"
+                            data-task-status="{{ t['status'] }}"
+                            class="{% if t['status'] == 'completed' %}table-secondary{% endif %}"
+                        >
                             <td>
                                 <div class="fw-semibold mb-1">{{ t["title"] }}</div>
 
@@ -181,6 +192,15 @@
                                         {% endif %}
                                     {% endif %}
                                 </div>
+
+                                <div class="small text-muted mt-1">
+                                    Added:
+                                    <span class="task-added-text">{{ t["created_at_display"] or "—" }}</span>
+                                    {% if t["status"] == "completed" %}
+                                        · Completed:
+                                        <span class="task-completed-text">{{ t["completed_at_display"] or "—" }}</span>
+                                    {% endif %}
+                                </div>
                             </td>
 
                             <td>
@@ -193,9 +213,9 @@
                                 {% endif %}
                             </td>
 
-                            <td>{{ t["duration"] }} min</td>
+                            <td class="task-planned-cell">{{ t["duration"] }} min</td>
 
-                            <td>
+                            <td class="task-actual-cell">
                                 {% if t["status"] == "completed" and t["actual_duration"] %}
                                     {{ t["actual_duration"] }} min
                                 {% else %}
@@ -203,7 +223,7 @@
                                 {% endif %}
                             </td>
 
-                            <td>
+                            <td class="task-delta-cell">
                                 {% if t["status"] == "completed" and t["actual_duration"] %}
                                     {% set delta = t["actual_duration"] - t["duration"] %}
                                     {% if delta > 0 %}
@@ -218,7 +238,7 @@
                                 {% endif %}
                             </td>
 
-                            <td>
+                            <td class="task-status-cell">
                                 {% if t["status"] == "completed" %}
                                     <span class="badge text-bg-secondary">Completed</span>
                                 {% else %}
@@ -226,15 +246,27 @@
                                 {% endif %}
                             </td>
 
-                            <td>
+                            <td class="task-actions-cell">
                                 <div class="d-flex flex-wrap gap-2">
                                     {% if t["status"] != "completed" %}
-                                        <a href="/complete/{{ t['id'] }}" class="btn btn-success btn-sm">Complete</a>
+                                        <button
+                                            type="button"
+                                            class="btn btn-success btn-sm complete-task-btn"
+                                            data-complete-task-id="{{ t['id'] }}"
+                                            data-complete-task-title="{{ t['title'] }}"
+                                            data-complete-task-duration="{{ t['duration'] }}"
+                                        >
+                                            Complete
+                                        </button>
                                     {% endif %}
 
-                                    <form method="post" action="/delete/{{ t['id'] }}" class="d-inline">
-                                        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-                                    </form>
+                                    <button
+                                        type="button"
+                                        class="btn btn-danger btn-sm delete-task-btn"
+                                        data-delete-task-id="{{ t['id'] }}"
+                                    >
+                                        Delete
+                                    </button>
                                 </div>
                             </td>
                         </tr>
@@ -244,18 +276,63 @@
             </div>
         </div>
     </div>
+
+    <div class="card border-0 shadow-sm d-none" id="emptyStateCard">
+        <div class="card-body text-center py-5">
+            <h3 class="h5 mb-2">No tasks yet</h3>
+            <p class="text-muted mb-0">Add your first task to start building your daily workflow.</p>
+        </div>
+    </div>
 {% else %}
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm" id="emptyStateCard">
         <div class="card-body text-center py-5">
             <h3 class="h5 mb-2">No tasks yet</h3>
             <p class="text-muted mb-0">Add your first task to start building your daily workflow.</p>
         </div>
     </div>
 {% endif %}
+
+<div class="modal fade" id="completeTaskModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Complete Task</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+
+            <div class="modal-body">
+                <p class="text-muted mb-3" id="completeTaskModalText">
+                    Enter how long the task actually took in minutes.
+                </p>
+
+                <div class="mb-3">
+                    <label for="completeActualDuration" class="form-label">Actual duration (minutes)</label>
+                    <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        class="form-control"
+                        id="completeActualDuration"
+                        placeholder="e.g. 45"
+                    >
+                </div>
+
+                <div class="small text-danger d-none" id="completeTaskError"></div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" id="confirmCompleteTaskBtn">Save & Complete</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
+  const ACTIVE_PAGE = "{{ active_page }}";
+
   const priorityEl = document.getElementById("priority");
   const deadlineEl = document.getElementById("deadline");
   const durationEl = document.getElementById("duration");
@@ -264,13 +341,99 @@
   const useBtn = document.getElementById("useRecommendedBtn");
   const usedRecommendationInput = document.getElementById("usedRecommendationInput");
 
+  const workloadSection = document.getElementById("workloadSection");
+  const taskListCard = document.getElementById("taskListCard");
+  const emptyStateCard = document.getElementById("emptyStateCard");
+  const tasksTableBody = document.getElementById("tasksTableBody");
+
+  const completeTaskModalEl = document.getElementById("completeTaskModal");
+  const completeTaskModal = completeTaskModalEl ? new bootstrap.Modal(completeTaskModalEl) : null;
+  const completeTaskModalText = document.getElementById("completeTaskModalText");
+  const completeActualDurationEl = document.getElementById("completeActualDuration");
+  const completeTaskErrorEl = document.getElementById("completeTaskError");
+  const confirmCompleteTaskBtn = document.getElementById("confirmCompleteTaskBtn");
+
   let lastRecommended = null;
+  let selectedCompleteTaskId = null;
+  let selectedCompleteTaskRow = null;
+  let selectedCompleteTaskPlanned = 0;
 
   function resetRecommendationAppliedState() {
     if (usedRecommendationInput) {
       usedRecommendationInput.value = "0";
     }
     useBtn.textContent = "Use recommended";
+  }
+
+  function updateEmptyState() {
+    if (!tasksTableBody) return;
+
+    const rows = tasksTableBody.querySelectorAll("[data-task-row]");
+    const hasRows = rows.length > 0;
+
+    if (taskListCard) {
+      taskListCard.classList.toggle("d-none", !hasRows);
+    }
+
+    if (emptyStateCard) {
+      emptyStateCard.classList.toggle("d-none", hasRows);
+    }
+  }
+
+  function formatDateTimeForUi(rawValue) {
+    if (!rawValue) return "—";
+    return String(rawValue).replace("T", " ");
+  }
+
+  function renderWorkloadSection(workload) {
+    if (!workloadSection) return;
+
+    if (!workload || workload.level === "none") {
+      workloadSection.innerHTML = "";
+      return;
+    }
+
+    const title = workload.level === "high" ? "Overload Warning" : "Workload Notice";
+    const badge = workload.level === "high"
+      ? '<span class="badge text-bg-danger">High Pressure</span>'
+      : '<span class="badge text-bg-warning">Monitor Workload</span>';
+
+    const warningsHtml = (workload.warnings || [])
+      .map((warning) => `<li class="mb-2">${warning}</li>`)
+      .join("");
+
+    workloadSection.innerHTML = `
+      <div class="card border-0 shadow-sm mb-4 overload-card overload-${workload.level}" id="workloadCard">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+            <div>
+              <h3 class="h5 mb-2">${title}</h3>
+              <div class="small text-muted mb-3">
+                Workload utilization: ${workload.utilization}% ·
+                Active tasks: ${workload.active_count} ·
+                Urgent tasks: ${workload.urgent_count} ·
+                High-risk tasks: ${workload.risk_count}
+              </div>
+              <ul class="mb-0">${warningsHtml}</ul>
+            </div>
+            <div>${badge}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function refreshWorkloadSection() {
+    try {
+      const res = await fetch("/api/workload");
+      const data = await res.json();
+
+      if (data.ok) {
+        renderWorkloadSection(data.workload);
+      }
+    } catch (err) {
+      // silent
+    }
   }
 
   async function refreshRecommendation() {
@@ -350,6 +513,187 @@
     }
   }
 
+  function buildDeltaBadge(delta) {
+    if (delta > 0) {
+      return `<span class="badge text-bg-danger">+${delta}</span>`;
+    }
+    if (delta < 0) {
+      return `<span class="badge text-bg-success">${delta}</span>`;
+    }
+    return `<span class="badge text-bg-secondary">0</span>`;
+  }
+
+  function moveRowToCompletedSection(row) {
+    if (!row || !tasksTableBody) return;
+    tasksTableBody.appendChild(row);
+  }
+
+  function markRowCompleted(row, actualDuration) {
+    if (!row) return;
+
+    row.classList.add("table-secondary");
+    row.dataset.taskStatus = "completed";
+
+    const planned = parseInt(row.dataset.taskDuration || "0", 10);
+    const delta = actualDuration - planned;
+    const now = new Date();
+    const completedAtText = formatDateTimeForUi(now.toISOString().slice(0, 19));
+
+    const actualCell = row.querySelector(".task-actual-cell");
+    const deltaCell = row.querySelector(".task-delta-cell");
+    const statusCell = row.querySelector(".task-status-cell");
+    const completedTextEl = row.querySelector(".task-completed-text");
+
+    if (actualCell) {
+      actualCell.textContent = `${actualDuration} min`;
+    }
+
+    if (deltaCell) {
+      deltaCell.innerHTML = buildDeltaBadge(delta);
+    }
+
+    if (statusCell) {
+      statusCell.innerHTML = `<span class="badge text-bg-secondary">Completed</span>`;
+    }
+
+    const completeBtn = row.querySelector(".complete-task-btn");
+    if (completeBtn) {
+      completeBtn.remove();
+    }
+
+    const metaLine = row.querySelector(".task-completed-text");
+    if (metaLine) {
+      metaLine.textContent = completedAtText;
+    } else {
+      const metaContainer = row.querySelector(".small.text-muted.mt-1");
+      if (metaContainer) {
+        metaContainer.insertAdjacentHTML(
+          "beforeend",
+          ` · Completed: <span class="task-completed-text">${completedAtText}</span>`
+        );
+      }
+    }
+
+    if (ACTIVE_PAGE === "active") {
+      row.remove();
+      updateEmptyState();
+      return;
+    }
+
+    if (ACTIVE_PAGE === "all" || ACTIVE_PAGE === "view") {
+      moveRowToCompletedSection(row);
+    }
+  }
+
+  async function handleDeleteTask(taskId, row) {
+    const confirmed = window.confirm("Delete this task?");
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/delete/${taskId}`, {
+        method: "POST",
+        headers: {
+          "X-Requested-With": "fetch"
+        }
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Delete failed.");
+      }
+
+      if (row) {
+        row.remove();
+      }
+
+      updateEmptyState();
+
+      if (data.workload) {
+        renderWorkloadSection(data.workload);
+      } else {
+        refreshWorkloadSection();
+      }
+    } catch (err) {
+      alert(err.message || "Delete failed.");
+    }
+  }
+
+  function openCompleteModal(taskId, row, title, plannedDuration) {
+    selectedCompleteTaskId = taskId;
+    selectedCompleteTaskRow = row;
+    selectedCompleteTaskPlanned = plannedDuration;
+
+    if (completeTaskModalText) {
+      completeTaskModalText.textContent =
+        `Enter how long "${title}" actually took in minutes.`;
+    }
+
+    if (completeActualDurationEl) {
+      completeActualDurationEl.value = plannedDuration || "";
+      completeActualDurationEl.focus();
+      completeActualDurationEl.select();
+    }
+
+    if (completeTaskErrorEl) {
+      completeTaskErrorEl.textContent = "";
+      completeTaskErrorEl.classList.add("d-none");
+    }
+
+    completeTaskModal?.show();
+  }
+
+  async function submitCompleteTask() {
+    if (!selectedCompleteTaskId) return;
+
+    const actualDuration = parseInt(completeActualDurationEl?.value || "0", 10);
+
+    if (!actualDuration || actualDuration <= 0) {
+      if (completeTaskErrorEl) {
+        completeTaskErrorEl.textContent = "Please enter a valid duration greater than 0.";
+        completeTaskErrorEl.classList.remove("d-none");
+      }
+      return;
+    }
+
+    confirmCompleteTaskBtn.disabled = true;
+
+    try {
+      const res = await fetch(`/api/complete/${selectedCompleteTaskId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "fetch"
+        },
+        body: JSON.stringify({
+          actual_duration: actualDuration
+        })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Complete failed.");
+      }
+
+      markRowCompleted(selectedCompleteTaskRow, actualDuration);
+      completeTaskModal?.hide();
+
+      if (data.workload) {
+        renderWorkloadSection(data.workload);
+      } else {
+        refreshWorkloadSection();
+      }
+    } catch (err) {
+      if (completeTaskErrorEl) {
+        completeTaskErrorEl.textContent = err.message || "Complete failed.";
+        completeTaskErrorEl.classList.remove("d-none");
+      }
+    } finally {
+      confirmCompleteTaskBtn.disabled = false;
+    }
+  }
+
   useBtn?.addEventListener("click", () => {
     if (lastRecommended !== null) {
       durationEl.value = lastRecommended;
@@ -380,5 +724,35 @@
     resetRecommendationAppliedState();
     refreshRecommendation();
   });
+
+  document.addEventListener("click", (event) => {
+    const deleteBtn = event.target.closest(".delete-task-btn");
+    if (deleteBtn) {
+      const taskId = deleteBtn.dataset.deleteTaskId;
+      const row = deleteBtn.closest("[data-task-row]");
+      handleDeleteTask(taskId, row);
+      return;
+    }
+
+    const completeBtn = event.target.closest(".complete-task-btn");
+    if (completeBtn) {
+      const taskId = completeBtn.dataset.completeTaskId;
+      const title = completeBtn.dataset.completeTaskTitle || "this task";
+      const plannedDuration = parseInt(completeBtn.dataset.completeTaskDuration || "0", 10);
+      const row = completeBtn.closest("[data-task-row]");
+      openCompleteModal(taskId, row, title, plannedDuration);
+    }
+  });
+
+  confirmCompleteTaskBtn?.addEventListener("click", submitCompleteTask);
+
+  completeActualDurationEl?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitCompleteTask();
+    }
+  });
+
+  updateEmptyState();
 </script>
 {% endblock %}

@@ -2,34 +2,21 @@
 
 {% block title %}Daily Planner · {{ app_name }}{% endblock %}
 {% block page_title %}Daily Planner{% endblock %}
-{% block page_subtitle %}Automatically generated workday timeline based on smart prioritization and task duration.{% endblock %}
+{% block page_subtitle %}Automatically generated workday timeline based on smart prioritization, multiple time blocks, and task splitting.{% endblock %}
 
 {% block content %}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body p-4">
         <h3 class="h5 mb-3">Planner Settings</h3>
 
-        <form method="get" action="/planner" class="row g-3 align-items-end">
+        <form method="get" action="/planner" class="row g-3 align-items-end" id="plannerForm">
             <div class="col-lg-3 col-md-6">
-                <label class="form-label">Start Time</label>
-                <input
-                    type="time"
-                    name="start_time"
-                    class="form-control"
-                    value="{{ planner_meta.start_time if planner_meta else '09:00' }}"
-                >
-            </div>
-
-            <div class="col-lg-3 col-md-6">
-                <label class="form-label">Available Minutes</label>
-                <input
-                    type="number"
-                    name="available_minutes"
-                    min="30"
-                    step="15"
-                    class="form-control"
-                    value="{{ planner_meta.available_minutes if planner_meta else 480 }}"
-                >
+                <label class="form-label">Number of Blocks</label>
+                <select name="block_count" id="blockCount" class="form-select">
+                    {% for n in range(1, max_planner_blocks + 1) %}
+                        <option value="{{ n }}" {% if planner_block_count == n %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
             </div>
 
             <div class="col-lg-3 col-md-6">
@@ -44,6 +31,42 @@
                 >
             </div>
 
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">Min Split Size</label>
+                <input
+                    type="number"
+                    name="min_split_minutes"
+                    min="1"
+                    step="1"
+                    class="form-control"
+                    value="{{ planner_meta.min_split_minutes if planner_meta else 15 }}"
+                >
+            </div>
+
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">Fallback Available Minutes</label>
+                <input
+                    type="number"
+                    name="available_minutes"
+                    min="1"
+                    step="1"
+                    class="form-control"
+                    value="{{ planner_meta.available_minutes if planner_meta else 480 }}"
+                >
+                <div class="form-text">Used only if no valid blocks are entered.</div>
+            </div>
+
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">Fallback Start Time</label>
+                <input
+                    type="time"
+                    name="start_time"
+                    class="form-control"
+                    value="{{ planner_meta.start_time if planner_meta else '09:00' }}"
+                >
+                <div class="form-text">Used only if no valid blocks are entered.</div>
+            </div>
+
             <div class="col-lg-2 col-md-6">
                 <div class="form-check mt-4">
                     <input
@@ -55,23 +78,91 @@
                         {% if planner_meta and planner_meta.use_predicted %}checked{% endif %}
                     >
                     <label class="form-check-label" for="usePredicted">
-                        Use AI duration
+                        AI
                     </label>
                 </div>
             </div>
 
-            <div class="col-lg-1 col-md-12">
+            <div class="col-lg-2 col-md-6">
+                <div class="form-check mt-4">
+                    <input
+                        class="form-check-input"
+                        type="checkbox"
+                        name="allow_split"
+                        value="1"
+                        id="allowSplit"
+                        {% if planner_meta and planner_meta.allow_split %}checked{% endif %}
+                    >
+                    <label class="form-check-label" for="allowSplit">
+                        Split
+                    </label>
+                </div>
+            </div>
+
+            <div class="col-lg-2 col-md-12">
                 <button type="submit" class="btn btn-primary w-100">Generate</button>
+            </div>
+
+            <div class="col-12">
+                <div class="row g-3" id="blockFields">
+                    {% for i in range(1, max_planner_blocks + 1) %}
+                        <div
+                            class="col-12 planner-block-group"
+                            data-block-index="{{ i }}"
+                            {% if i > planner_block_count %}style="display: none;"{% endif %}
+                        >
+                            <div class="task-block">
+                                <div class="row g-3 align-items-end">
+                                    <div class="col-lg-4 col-md-6">
+                                        <label class="form-label">Block {{ i }} Start</label>
+                                        <input
+                                            type="time"
+                                            name="block_{{ i }}_start"
+                                            class="form-control"
+                                            value="{{ planner_block_fields['block_' ~ i ~ '_start'] }}"
+                                        >
+                                    </div>
+
+                                    <div class="col-lg-4 col-md-6">
+                                        <label class="form-label">Block {{ i }} End</label>
+                                        <input
+                                            type="time"
+                                            name="block_{{ i }}_end"
+                                            class="form-control"
+                                            value="{{ planner_block_fields['block_' ~ i ~ '_end'] }}"
+                                        >
+                                    </div>
+
+                                    <div class="col-lg-4 col-md-12">
+                                        <div class="form-text mb-1">Enter the working interval for block {{ i }}.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
             </div>
         </form>
 
         {% if planner_meta %}
             <div class="small text-muted mt-3">
-                Planning window: {{ planner_meta.start_time }} – {{ planner_meta.end_time }}
-                · Available: {{ planner_meta.available_minutes }} min
+                Total planning range: {{ planner_meta.start_time }} – {{ planner_meta.end_time }}
+                · Total available: {{ planner_meta.available_minutes }} min
+                · Scheduled: {{ planner_meta.scheduled_minutes }} min
                 · Break: {{ planner_meta.break_minutes }} min
                 · AI duration: {% if planner_meta.use_predicted %}enabled{% else %}disabled{% endif %}
+                · Split: {% if planner_meta.allow_split %}enabled{% else %}disabled{% endif %}
             </div>
+
+            {% if planner_meta.blocks %}
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    {% for block in planner_meta.blocks %}
+                        <span class="badge text-bg-secondary">
+                            Block {{ block.index }}: {{ block.start }}–{{ block.end }} ({{ block.minutes }} min)
+                        </span>
+                    {% endfor %}
+                </div>
+            {% endif %}
         {% endif %}
     </div>
 </div>
@@ -118,7 +209,7 @@
 <div class="row g-4">
     <div class="col-xl-8">
         <div class="card border-0 shadow-sm">
-            <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <strong>Scheduled Timeline</strong>
                 <span class="badge text-bg-primary">
                     {{ planner_meta.start_time if planner_meta else "09:00" }}–{{ planner_meta.end_time if planner_meta else "17:00" }}
@@ -153,7 +244,12 @@
                                     ">
                                         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
                                             <div>
-                                                <h4 class="h5 mb-2">{{ item.title }}</h4>
+                                                <h4 class="h5 mb-2">
+                                                    {{ item.title }}
+                                                    {% if item.is_split %}
+                                                        <span class="small text-muted">· {{ item.part_label }}</span>
+                                                    {% endif %}
+                                                </h4>
 
                                                 <div class="d-flex flex-wrap gap-2 mb-2">
                                                     {% if item.priority == 3 %}
@@ -166,6 +262,10 @@
 
                                                     <span class="badge text-bg-primary">{{ item.duration }} min</span>
 
+                                                    {% if item.is_split %}
+                                                        <span class="badge text-bg-secondary">Split Task</span>
+                                                    {% endif %}
+
                                                     {% if not item.used_recommendation and item.predicted_duration != item.planned_duration %}
                                                         <span class="badge text-bg-warning">
                                                             planned {{ item.planned_duration }} / predicted {{ item.predicted_duration }}
@@ -175,6 +275,7 @@
 
                                                 <div class="timeline-meta">
                                                     <span>Deadline: {{ item.deadline }}</span>
+                                                    <span>Block {{ item.block_index }}: {{ item.block_start }}–{{ item.block_end }}</span>
                                                 </div>
                                             </div>
 
@@ -218,6 +319,10 @@
                                     {% else %}
                                         <span class="badge text-bg-secondary">Low</span>
                                     {% endif %}
+
+                                    {% if t["is_partial"] %}
+                                        <span class="badge text-bg-warning">Partially scheduled</span>
+                                    {% endif %}
                                 </div>
 
                                 <div class="small text-muted">
@@ -227,6 +332,18 @@
                                 {% if t["predicted_duration"] is defined and (not t["used_recommendation"]) and t["predicted_duration"] != t["planned_duration"] %}
                                     <div class="small text-muted">
                                         Predicted: {{ t["predicted_duration"] }} min
+                                    </div>
+                                {% endif %}
+
+                                {% if t["remaining_duration"] is defined %}
+                                    <div class="small text-muted">
+                                        Remaining unscheduled: {{ t["remaining_duration"] }} min
+                                    </div>
+                                {% endif %}
+
+                                {% if t["scheduled_duration"] is defined and t["scheduled_duration"] > 0 %}
+                                    <div class="small text-muted">
+                                        Already scheduled: {{ t["scheduled_duration"] }} min
                                     </div>
                                 {% endif %}
 
@@ -249,13 +366,33 @@
 
             <div class="card-body">
                 <ul class="mb-0">
-                    <li>Start time is user-defined</li>
-                    <li>Available time is user-defined</li>
+                    <li>Supports multiple custom time blocks</li>
+                    <li>Falls back to one block if no valid blocks are entered</li>
                     <li>Break between tasks is configurable</li>
                     <li>AI-based duration can be enabled or disabled</li>
+                    <li>Large tasks can be split across blocks</li>
                 </ul>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const blockCountEl = document.getElementById("blockCount");
+  const blockGroups = document.querySelectorAll(".planner-block-group");
+
+  function refreshVisibleBlocks() {
+    const count = parseInt(blockCountEl?.value || "1", 10);
+
+    blockGroups.forEach((group) => {
+      const index = parseInt(group.dataset.blockIndex || "0", 10);
+      group.style.display = index <= count ? "" : "none";
+    });
+  }
+
+  blockCountEl?.addEventListener("change", refreshVisibleBlocks);
+  refreshVisibleBlocks();
+</script>
 {% endblock %}

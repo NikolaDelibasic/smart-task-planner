@@ -23,12 +23,108 @@ app = Flask(__name__)
 
 init_db()
 
+MAX_PLANNER_BLOCKS = 5
+
 
 def _safe_parse_task_date(deadline_value: str):
     try:
         return date.fromisoformat(str(deadline_value)[:10])
     except Exception:
         return None
+
+
+def _format_datetime_for_ui(value: str | None):
+    if not value:
+        return None
+
+    try:
+        dt = datetime.fromisoformat(str(value))
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(value)
+
+
+def _parse_time_value(value: str):
+    try:
+        parts = str(value).strip().split(":")
+        if len(parts) != 2:
+            return None
+
+        hour = int(parts[0])
+        minute = int(parts[1])
+
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+
+        return hour, minute
+    except Exception:
+        return None
+
+
+def _normalize_block_count(raw_value, default=1):
+    try:
+        count = int(raw_value)
+    except (TypeError, ValueError):
+        count = default
+
+    return max(1, min(MAX_PLANNER_BLOCKS, count))
+
+
+def _collect_time_blocks_from_request(req_args, block_count: int) -> str:
+    blocks = []
+
+    for i in range(1, block_count + 1):
+        start_val = req_args.get(f"block_{i}_start", "").strip()
+        end_val = req_args.get(f"block_{i}_end", "").strip()
+
+        if not start_val or not end_val:
+            continue
+
+        start_parsed = _parse_time_value(start_val)
+        end_parsed = _parse_time_value(end_val)
+
+        if not start_parsed or not end_parsed:
+            continue
+
+        start_minutes = start_parsed[0] * 60 + start_parsed[1]
+        end_minutes = end_parsed[0] * 60 + end_parsed[1]
+
+        if end_minutes <= start_minutes:
+            continue
+
+        blocks.append(f"{start_val}-{end_val}")
+
+    return ", ".join(blocks)
+
+
+def _extract_block_fields_from_time_blocks(time_blocks: str, block_count: int):
+    values = {}
+
+    for i in range(1, MAX_PLANNER_BLOCKS + 1):
+        values[f"block_{i}_start"] = ""
+        values[f"block_{i}_end"] = ""
+
+    chunks = [chunk.strip() for chunk in str(time_blocks or "").split(",") if chunk.strip()]
+
+    parsed_pairs = []
+    for chunk in chunks:
+        if "-" not in chunk:
+            continue
+        left, right = chunk.split("-", 1)
+        left = left.strip()
+        right = right.strip()
+
+        if _parse_time_value(left) and _parse_time_value(right):
+            parsed_pairs.append((left, right))
+
+    effective_count = max(block_count, len(parsed_pairs))
+    effective_count = max(1, min(MAX_PLANNER_BLOCKS, effective_count))
+
+    for idx, pair in enumerate(parsed_pairs[:MAX_PLANNER_BLOCKS], start=1):
+        values[f"block_{idx}_start"] = pair[0]
+        values[f"block_{idx}_end"] = pair[1]
+
+    return effective_count, values
 
 
 def _decorate_tasks(tasks):
@@ -46,6 +142,8 @@ def _decorate_tasks(tasks):
         task_dict["is_due_soon"] = False
         task_dict["days_left"] = None
         task_dict["risk"] = None
+        task_dict["created_at_display"] = _format_datetime_for_ui(task_dict.get("created_at"))
+        task_dict["completed_at_display"] = _format_datetime_for_ui(task_dict.get("completed_at"))
 
         if deadline_date:
             days_left = (deadline_date - today).days
@@ -73,6 +171,20 @@ def _decorate_tasks(tasks):
         decorated.append(task_dict)
 
     return decorated
+
+
+def _current_workload_payload():
+    tasks = _decorate_tasks(get_all_tasks())
+    workload = analyze_workload(tasks)
+    return {
+        "level": workload["level"],
+        "utilization": workload["utilization"],
+        "active_count": workload["active_count"],
+        "total_minutes": workload["total_minutes"],
+        "urgent_count": workload["urgent_count"],
+        "risk_count": workload["risk_count"],
+        "warnings": workload["warnings"],
+    }
 
 
 @app.context_processor
@@ -124,6 +236,19 @@ def delete(task_id):
     return redirect(url_for("home"))
 
 
+@app.route("/api/delete/<int:task_id>", methods=["POST"])
+def api_delete(task_id):
+    try:
+        delete_task(task_id)
+        return jsonify({
+            "ok": True,
+            "task_id": task_id,
+            "workload": _current_workload_payload(),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/complete/<int:task_id>")
 def complete_form(task_id):
     return render_template("complete.html", task_id=task_id, active_page="all")
@@ -143,6 +268,42 @@ def done(task_id):
 
     mark_completed(task_id, actual_duration)
     return redirect(url_for("home"))
+
+
+@app.route("/api/complete/<int:task_id>", methods=["POST"])
+def api_complete(task_id):
+    try:
+        payload = request.get_json(silent=True) or {}
+        actual_duration = payload.get("actual_duration")
+
+        if actual_duration is None:
+            actual_duration = request.form.get("actual_duration", "0")
+
+        actual_duration = int(actual_duration)
+
+        if actual_duration <= 0:
+            return jsonify({"ok": False, "error": "Actual duration must be greater than 0."}), 400
+
+        mark_completed(task_id, actual_duration)
+
+        return jsonify({
+            "ok": True,
+            "task_id": task_id,
+            "actual_duration": actual_duration,
+            "workload": _current_workload_payload(),
+        })
+    except ValueError:
+        return jsonify({"ok": False, "error": "Invalid actual duration."}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/workload")
+def api_workload():
+    return jsonify({
+        "ok": True,
+        "workload": _current_workload_payload(),
+    })
 
 
 @app.route("/active")
@@ -265,8 +426,19 @@ def planner():
     except ValueError:
         break_minutes = 10
 
+    try:
+        min_split_minutes = int(request.args.get("min_split_minutes", "15"))
+    except ValueError:
+        min_split_minutes = 15
+
     use_predicted_raw = request.args.get("use_predicted", "1")
     use_predicted = use_predicted_raw == "1"
+
+    allow_split_raw = request.args.get("allow_split", "1")
+    allow_split = allow_split_raw == "1"
+
+    block_count = _normalize_block_count(request.args.get("block_count", "1"), default=1)
+    time_blocks = _collect_time_blocks_from_request(request.args, block_count)
 
     schedule, unscheduled, planner_meta = generate_daily_plan(
         tasks,
@@ -274,6 +446,14 @@ def planner():
         start_time=start_time,
         available_minutes=available_minutes,
         break_minutes=break_minutes,
+        time_blocks=time_blocks,
+        allow_split=allow_split,
+        min_split_minutes=min_split_minutes,
+    )
+
+    effective_block_count, block_fields = _extract_block_fields_from_time_blocks(
+        planner_meta.get("time_blocks", ""),
+        block_count,
     )
 
     return render_template(
@@ -283,6 +463,9 @@ def planner():
         active_page="planner",
         workload=workload,
         planner_meta=planner_meta,
+        planner_block_count=effective_block_count,
+        planner_block_fields=block_fields,
+        max_planner_blocks=MAX_PLANNER_BLOCKS,
     )
 
 
