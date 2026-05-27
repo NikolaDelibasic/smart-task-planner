@@ -2,9 +2,16 @@ from datetime import date, datetime, timedelta
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
+from core.ai_engine import get_ai_task_advice
 from core.auto_scheduler import generate_daily_plan
 from core.database import init_db
-from core.predictor import recommend_duration
+from core.priority import (
+    normalize_priority,
+    priority_badge,
+    priority_label,
+    priority_options,
+    priority_short_label,
+)
 from core.risk import assess_risk
 from core.scheduler import suggest_order
 from core.stats import get_basic_stats
@@ -19,8 +26,8 @@ from core.task_manager import (
 )
 from core.workload import analyze_workload
 
-app = Flask(__name__)
 
+app = Flask(__name__)
 init_db()
 
 MAX_PLANNER_BLOCKS = 5
@@ -33,7 +40,7 @@ def _safe_parse_task_date(deadline_value: str):
         return None
 
 
-def _format_datetime_for_ui(value: str | None):
+def _format_datetime_for_ui(value):
     if not value:
         return None
 
@@ -47,6 +54,7 @@ def _format_datetime_for_ui(value: str | None):
 def _parse_time_value(value: str):
     try:
         parts = str(value).strip().split(":")
+
         if len(parts) != 2:
             return None
 
@@ -57,6 +65,7 @@ def _parse_time_value(value: str):
             return None
 
         return hour, minute
+
     except Exception:
         return None
 
@@ -104,12 +113,18 @@ def _extract_block_fields_from_time_blocks(time_blocks: str, block_count: int):
         values[f"block_{i}_start"] = ""
         values[f"block_{i}_end"] = ""
 
-    chunks = [chunk.strip() for chunk in str(time_blocks or "").split(",") if chunk.strip()]
+    chunks = [
+        chunk.strip()
+        for chunk in str(time_blocks or "").split(",")
+        if chunk.strip()
+    ]
 
     parsed_pairs = []
+
     for chunk in chunks:
         if "-" not in chunk:
             continue
+
         left, right = chunk.split("-", 1)
         left = left.strip()
         right = right.strip()
@@ -134,6 +149,12 @@ def _decorate_tasks(tasks):
     for task in tasks:
         task_dict = dict(task)
 
+        task_priority = normalize_priority(task_dict.get("priority", 3))
+        task_dict["priority"] = task_priority
+        task_dict["priority_label"] = priority_label(task_priority)
+        task_dict["priority_short_label"] = priority_short_label(task_priority)
+        task_dict["priority_badge"] = priority_badge(task_priority)
+
         deadline_date = _safe_parse_task_date(task_dict.get("deadline", ""))
         status = task_dict.get("status", "pending")
 
@@ -157,14 +178,16 @@ def _decorate_tasks(tasks):
         if status != "completed":
             try:
                 risk = assess_risk(
-                    priority=int(task_dict["priority"]),
+                    priority=task_priority,
                     planned=int(task_dict["duration"]),
                     deadline=str(task_dict["deadline"]),
                 )
+
                 task_dict["risk"] = {
                     "overtime_risk": risk.overtime_risk,
                     "late_risk": risk.late_risk,
                 }
+
             except Exception:
                 task_dict["risk"] = None
 
@@ -176,6 +199,7 @@ def _decorate_tasks(tasks):
 def _current_workload_payload():
     tasks = _decorate_tasks(get_all_tasks())
     workload = analyze_workload(tasks)
+
     return {
         "level": workload["level"],
         "utilization": workload["utilization"],
@@ -192,6 +216,7 @@ def inject_globals():
     return {
         "app_name": "Smart Task Planner",
         "current_year": datetime.now().year,
+        "priority_options": priority_options(),
     }
 
 
@@ -199,6 +224,7 @@ def inject_globals():
 def home():
     tasks = _decorate_tasks(get_all_tasks())
     workload = analyze_workload(tasks)
+
     return render_template(
         "index.html",
         tasks=tasks,
@@ -211,13 +237,13 @@ def home():
 @app.route("/add", methods=["POST"])
 def add():
     title = request.form.get("title", "").strip()
-    priority = request.form.get("priority", "1").strip()
+    priority = request.form.get("priority", "3").strip()
     deadline = request.form.get("deadline", "").strip()
     duration = request.form.get("duration", "0").strip()
     used_recommendation = request.form.get("used_recommendation", "0").strip()
 
     try:
-        priority = int(priority)
+        priority = normalize_priority(priority)
         duration = int(duration)
         used_recommendation = int(used_recommendation)
     except ValueError:
@@ -226,7 +252,14 @@ def add():
     if not title or not deadline or duration <= 0:
         return redirect(url_for("home"))
 
-    add_task(title, priority, deadline, duration, used_recommendation=used_recommendation)
+    add_task(
+        title,
+        priority,
+        deadline,
+        duration,
+        used_recommendation=used_recommendation,
+    )
+
     return redirect(url_for("home"))
 
 
@@ -240,18 +273,24 @@ def delete(task_id):
 def api_delete(task_id):
     try:
         delete_task(task_id)
+
         return jsonify({
             "ok": True,
             "task_id": task_id,
             "workload": _current_workload_payload(),
         })
+
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/complete/<int:task_id>")
 def complete_form(task_id):
-    return render_template("complete.html", task_id=task_id, active_page="all")
+    return render_template(
+        "complete.html",
+        task_id=task_id,
+        active_page="all",
+    )
 
 
 @app.route("/done/<int:task_id>", methods=["POST"])
@@ -267,6 +306,7 @@ def done(task_id):
         return redirect(url_for("complete_form", task_id=task_id))
 
     mark_completed(task_id, actual_duration)
+
     return redirect(url_for("home"))
 
 
@@ -282,7 +322,10 @@ def api_complete(task_id):
         actual_duration = int(actual_duration)
 
         if actual_duration <= 0:
-            return jsonify({"ok": False, "error": "Actual duration must be greater than 0."}), 400
+            return jsonify({
+                "ok": False,
+                "error": "Actual duration must be greater than 0.",
+            }), 400
 
         mark_completed(task_id, actual_duration)
 
@@ -292,8 +335,10 @@ def api_complete(task_id):
             "actual_duration": actual_duration,
             "workload": _current_workload_payload(),
         })
+
     except ValueError:
         return jsonify({"ok": False, "error": "Invalid actual duration."}), 400
+
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -310,6 +355,7 @@ def api_workload():
 def active():
     tasks = _decorate_tasks(get_active_tasks())
     workload = analyze_workload(tasks)
+
     return render_template(
         "index.html",
         tasks=tasks,
@@ -323,6 +369,7 @@ def active():
 def done_view():
     tasks = _decorate_tasks(get_completed_tasks())
     workload = analyze_workload(tasks)
+
     return render_template(
         "index.html",
         tasks=tasks,
@@ -336,6 +383,7 @@ def done_view():
 def view():
     mode = request.args.get("mode")
     date_param = request.args.get("date")
+
     today = date.today()
 
     if date_param:
@@ -348,6 +396,7 @@ def view():
         end = (selected + timedelta(days=1)).isoformat()
 
         tasks = _decorate_tasks(get_tasks_by_date_range(start, end))
+
         return render_template(
             "index.html",
             tasks=tasks,
@@ -360,25 +409,37 @@ def view():
         start = today
         end = today + timedelta(days=1)
         title = "Today"
+
     elif mode == "week":
         start = today - timedelta(days=today.weekday())
         end = start + timedelta(days=7)
         title = "This Week"
+
     elif mode == "month":
         start = today.replace(day=1)
+
         if start.month == 12:
             end = start.replace(year=start.year + 1, month=1)
         else:
             end = start.replace(month=start.month + 1)
+
         title = "This Month"
+
     elif mode == "year":
         start = today.replace(month=1, day=1)
         end = start.replace(year=start.year + 1)
         title = "This Year"
+
     else:
         return redirect(url_for("home"))
 
-    tasks = _decorate_tasks(get_tasks_by_date_range(start.isoformat(), end.isoformat()))
+    tasks = _decorate_tasks(
+        get_tasks_by_date_range(
+            start.isoformat(),
+            end.isoformat(),
+        )
+    )
+
     return render_template(
         "index.html",
         tasks=tasks,
@@ -392,6 +453,7 @@ def view():
 def suggest():
     tasks = suggest_order(get_all_tasks())
     tasks = _decorate_tasks(tasks)
+
     return render_template(
         "suggest.html",
         tasks=tasks,
@@ -402,6 +464,7 @@ def suggest():
 @app.route("/stats")
 def stats():
     data = get_basic_stats()
+
     return render_template(
         "stats.html",
         stats=data,
@@ -437,8 +500,15 @@ def planner():
     allow_split_raw = request.args.get("allow_split", "1")
     allow_split = allow_split_raw == "1"
 
-    block_count = _normalize_block_count(request.args.get("block_count", "1"), default=1)
-    time_blocks = _collect_time_blocks_from_request(request.args, block_count)
+    block_count = _normalize_block_count(
+        request.args.get("block_count", "1"),
+        default=1,
+    )
+
+    time_blocks = _collect_time_blocks_from_request(
+        request.args,
+        block_count,
+    )
 
     schedule, unscheduled, planner_meta = generate_daily_plan(
         tasks,
@@ -472,23 +542,36 @@ def planner():
 @app.route("/api/recommend")
 def api_recommend():
     try:
-        priority = int(request.args.get("priority", "2"))
+        priority = normalize_priority(request.args.get("priority", "3"))
         planned = int(request.args.get("planned", "0"))
         deadline = request.args.get("deadline", "").strip()
 
         if planned <= 0 or not deadline:
-            return jsonify({"ok": False, "error": "Missing planned or deadline"}), 400
+            return jsonify({
+                "ok": False,
+                "error": "Missing planned or deadline",
+            }), 400
 
-        rec = recommend_duration(priority=priority, planned=planned, deadline=deadline)
+        advice = get_ai_task_advice(
+            priority=priority,
+            planned=planned,
+            deadline=deadline,
+        )
 
         return jsonify({
             "ok": True,
-            "recommended": rec.recommended,
-            "confidence": rec.confidence,
-            "details": rec.details,
+            "recommended": advice["recommended"],
+            "confidence": advice["confidence"],
+            "risk_level": advice["risk_level"],
+            "time_risk": advice["time_risk"],
+            "deadline_risk": advice["deadline_risk"],
+            "assistant": advice["assistant"],
+            "details": advice["technical"],
         })
+
     except ValueError:
         return jsonify({"ok": False, "error": "Invalid input"}), 400
+
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -496,14 +579,21 @@ def api_recommend():
 @app.route("/api/risk")
 def api_risk():
     try:
-        priority = int(request.args.get("priority", "2"))
+        priority = normalize_priority(request.args.get("priority", "3"))
         planned = int(request.args.get("planned", "0"))
         deadline = request.args.get("deadline", "").strip()
 
         if planned <= 0 or not deadline:
-            return jsonify({"ok": False, "error": "Missing planned or deadline"}), 400
+            return jsonify({
+                "ok": False,
+                "error": "Missing planned or deadline",
+            }), 400
 
-        r = assess_risk(priority=priority, planned=planned, deadline=deadline)
+        r = assess_risk(
+            priority=priority,
+            planned=planned,
+            deadline=deadline,
+        )
 
         return jsonify({
             "ok": True,
@@ -513,8 +603,10 @@ def api_risk():
             "late_prob": r.late_prob,
             "reasons": r.reasons,
         })
+
     except ValueError:
         return jsonify({"ok": False, "error": "Invalid input"}), 400
+
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

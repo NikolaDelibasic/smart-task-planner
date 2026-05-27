@@ -6,3 +6,14 @@ __pycache__/
 *.db
 .DS_Store
 .env
+# Local environment
+venv/
+__pycache__/
+*.pyc
+
+# Local database and generated ML models
+planner.db
+core/models/
+
+# macOS
+.DS_Store
