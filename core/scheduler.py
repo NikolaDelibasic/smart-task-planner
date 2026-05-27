@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from core.priority import priority_sort_value
+
 
 def parse_deadline(deadline: str) -> datetime:
     """
@@ -20,9 +22,8 @@ def parse_deadline(deadline: str) -> datetime:
 
 def suggest_order(tasks):
     """
-    tasks: iterable of sqlite3.Row objects
-    Returns pending tasks sorted by:
-    1. priority descending
+    Active tasks sorted by:
+    1. priority ascending: P1 before P2 before P3 before P4 before P5
     2. earliest deadline first
     3. shorter duration first
     4. title alphabetical
@@ -31,11 +32,12 @@ def suggest_order(tasks):
 
     def key(t):
         deadline_dt = parse_deadline(t["deadline"])
+
         return (
-            -int(t["priority"]),
+            priority_sort_value(t["priority"]),
             deadline_dt,
             int(t["duration"]),
-            str(t["title"]).lower()
+            str(t["title"]).lower(),
         )
 
     return sorted(pending, key=key)

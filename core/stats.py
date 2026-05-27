@@ -9,7 +9,6 @@ def _build_insights(stats: dict) -> list[str]:
     insights = []
 
     total = stats["total"]
-    completed = stats["completed"]
     active = stats["active"]
     avg_delta = stats["avg_delta"]
     planning_accuracy = stats["planning_accuracy"]
@@ -43,6 +42,7 @@ def _build_insights(stats: dict) -> list[str]:
 
     if completed_by_priority:
         top_priority = max(completed_by_priority, key=completed_by_priority.get)
+
         if top_priority == 3:
             insights.append("Most of your completed tasks are high-priority tasks.")
         elif top_priority == 2:
@@ -68,7 +68,6 @@ def get_basic_stats():
         cur = conn.cursor()
         stats = {}
 
-        # === CURRENT BOARD STATE (tasks) ===
         cur.execute("SELECT COUNT(*) AS count FROM tasks")
         stats["total"] = cur.fetchone()["count"]
 
@@ -81,7 +80,6 @@ def get_basic_stats():
         cur.execute("SELECT COALESCE(SUM(duration), 0) AS total_time FROM tasks")
         stats["total_time"] = cur.fetchone()["total_time"]
 
-        # === LONG-TERM LEARNING / ANALYTICS (task_history) ===
         cur.execute("SELECT COUNT(*) AS count FROM task_history")
         stats["completed"] = cur.fetchone()["count"]
 
@@ -114,26 +112,32 @@ def get_basic_stats():
         stats["avg_delta"] = round(avg, 1) if avg is not None else None
 
         cur.execute("""
-            SELECT COALESCE(SUM(
-                CASE
-                    WHEN (actual_duration - planned_duration) > 0
-                    THEN (actual_duration - planned_duration)
-                    ELSE 0
-                END
-            ), 0) AS total_overtime
+            SELECT COALESCE(
+                SUM(
+                    CASE
+                        WHEN (actual_duration - planned_duration) > 0
+                        THEN (actual_duration - planned_duration)
+                        ELSE 0
+                    END
+                ),
+                0
+            ) AS total_overtime
             FROM task_history
             WHERE actual_duration IS NOT NULL
         """)
         stats["total_overtime"] = cur.fetchone()["total_overtime"]
 
         cur.execute("""
-            SELECT COALESCE(SUM(
-                CASE
-                    WHEN (actual_duration - planned_duration) < 0
-                    THEN -(actual_duration - planned_duration)
-                    ELSE 0
-                END
-            ), 0) AS total_undertime
+            SELECT COALESCE(
+                SUM(
+                    CASE
+                        WHEN (actual_duration - planned_duration) < 0
+                        THEN -(actual_duration - planned_duration)
+                        ELSE 0
+                    END
+                ),
+                0
+            ) AS total_undertime
             FROM task_history
             WHERE actual_duration IS NOT NULL
         """)
@@ -146,43 +150,44 @@ def get_basic_stats():
             ORDER BY priority ASC
         """)
         stats["completed_by_priority"] = {
-            row["priority"]: row["count"] for row in cur.fetchall()
+            row["priority"]: row["count"]
+            for row in cur.fetchall()
         }
 
-        total = stats["total"]
-        completed = stats["completed"]
-        completed_time = stats["completed_time"]
-        actual_completed_time = stats["actual_completed_time"]
-        avg_delta = stats["avg_delta"]
+    total = stats["total"]
+    completed = stats["completed"]
+    completed_time = stats["completed_time"]
+    actual_completed_time = stats["actual_completed_time"]
+    avg_delta = stats["avg_delta"]
 
-        stats["completion_rate"] = round((completed / total) * 100, 1) if total > 0 else 0.0
+    stats["completion_rate"] = round((completed / total) * 100, 1) if total > 0 else 0.0
 
-        if actual_completed_time > 0:
-            planning_accuracy = (completed_time / actual_completed_time) * 100
-            stats["planning_accuracy"] = round(_clamp(planning_accuracy, 0, 100), 1)
-        else:
-            stats["planning_accuracy"] = None
+    if actual_completed_time > 0:
+        planning_accuracy = (completed_time / actual_completed_time) * 100
+        stats["planning_accuracy"] = round(_clamp(planning_accuracy, 0, 100), 1)
+    else:
+        stats["planning_accuracy"] = None
 
-        if avg_delta is not None:
-            productivity_score = round(_clamp(100 - abs(avg_delta), 0, 100), 1)
-        else:
-            productivity_score = 0.0
+    if avg_delta is not None:
+        productivity_score = round(_clamp(100 - abs(avg_delta), 0, 100), 1)
+    else:
+        productivity_score = 0.0
 
-        stats["productivity_score"] = productivity_score
+    stats["productivity_score"] = productivity_score
 
-        if productivity_score >= 85:
-            stats["score_label"] = "Excellent"
-            stats["score_color"] = "success"
-        elif productivity_score >= 70:
-            stats["score_label"] = "Good"
-            stats["score_color"] = "primary"
-        elif productivity_score >= 50:
-            stats["score_label"] = "Fair"
-            stats["score_color"] = "warning"
-        else:
-            stats["score_label"] = "Needs Improvement"
-            stats["score_color"] = "danger"
+    if productivity_score >= 85:
+        stats["score_label"] = "Excellent"
+        stats["score_color"] = "success"
+    elif productivity_score >= 70:
+        stats["score_label"] = "Good"
+        stats["score_color"] = "primary"
+    elif productivity_score >= 50:
+        stats["score_label"] = "Fair"
+        stats["score_color"] = "warning"
+    else:
+        stats["score_label"] = "Needs Improvement"
+        stats["score_color"] = "danger"
 
-        stats["insights"] = _build_insights(stats)
+    stats["insights"] = _build_insights(stats)
 
-        return stats
+    return stats

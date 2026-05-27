@@ -4,6 +4,13 @@ from datetime import datetime, timedelta
 from typing import List, Tuple
 
 from core.predictor import recommend_duration
+from core.priority import (
+    normalize_priority,
+    priority_badge,
+    priority_label,
+    priority_short_label,
+    priority_sort_value,
+)
 from core.scheduler import suggest_order
 
 DEFAULT_START_HOUR = 9
@@ -11,6 +18,13 @@ DEFAULT_START_MINUTE = 0
 DEFAULT_AVAILABLE_MINUTES = 8 * 60
 DEFAULT_BREAK_MINUTES = 10
 DEFAULT_MIN_SPLIT_MINUTES = 15
+
+
+def _row_has_key(row, key: str) -> bool:
+    try:
+        return key in row.keys()
+    except AttributeError:
+        return key in row
 
 
 def _parse_start_time(start_time: str | None) -> tuple[int, int]:
@@ -26,6 +40,7 @@ def _parse_start_time(start_time: str | None) -> tuple[int, int]:
             raise ValueError
 
         return hour, minute
+
     except Exception:
         return DEFAULT_START_HOUR, DEFAULT_START_MINUTE
 
@@ -43,6 +58,7 @@ def _parse_time_value(value: str) -> tuple[int, int]:
 
 def _build_datetime_for_today(time_str: str) -> datetime:
     hour, minute = _parse_time_value(time_str)
+
     return datetime.combine(
         datetime.today(),
         datetime.min.time(),
@@ -59,6 +75,7 @@ def _normalize_blocks_text(blocks_text: str | None) -> List[str]:
     for line in raw.split("\n"):
         for part in line.split(","):
             part = part.strip()
+
             if part:
                 pieces.append(part)
 
@@ -77,6 +94,7 @@ def _parse_time_blocks(
             continue
 
         left, right = chunk.split("-", 1)
+
         try:
             start_dt = _build_datetime_for_today(left.strip())
             end_dt = _build_datetime_for_today(right.strip())
@@ -90,12 +108,14 @@ def _parse_time_blocks(
 
     if parsed_blocks:
         merged: List[Tuple[datetime, datetime]] = []
+
         for start_dt, end_dt in parsed_blocks:
             if not merged:
                 merged.append((start_dt, end_dt))
                 continue
 
             prev_start, prev_end = merged[-1]
+
             if start_dt <= prev_end:
                 merged[-1] = (prev_start, max(prev_end, end_dt))
             else:
@@ -118,23 +138,16 @@ def _parse_time_blocks(
     return [(day_start, day_start + timedelta(minutes=available_minutes))]
 
 
-def _priority_label(priority: int) -> str:
-    if int(priority) == 3:
-        return "high"
-    if int(priority) == 2:
-        return "medium"
-    return "low"
-
-
 def _get_task_duration_meta(task, use_predicted: bool) -> tuple[int, int, int]:
     planned_duration = int(task["duration"])
-    used_recommendation = int(task["used_recommendation"]) if "used_recommendation" in task.keys() else 0
+    used_recommendation = int(task["used_recommendation"]) if _row_has_key(task, "used_recommendation") else 0
+
     predicted_duration = planned_duration
 
     if use_predicted and not used_recommendation:
         try:
             rec = recommend_duration(
-                priority=int(task["priority"]),
+                priority=normalize_priority(task["priority"]),
                 planned=planned_duration,
                 deadline=str(task["deadline"]),
             )
@@ -143,11 +156,13 @@ def _get_task_duration_meta(task, use_predicted: bool) -> tuple[int, int, int]:
             predicted_duration = planned_duration
 
     duration_for_schedule = predicted_duration if (use_predicted and not used_recommendation) else planned_duration
+
     return planned_duration, predicted_duration, max(1, duration_for_schedule)
 
 
 def _format_blocks_meta(blocks: List[Tuple[datetime, datetime]]) -> List[dict]:
     out = []
+
     for idx, (start_dt, end_dt) in enumerate(blocks, start=1):
         out.append({
             "index": idx,
@@ -155,7 +170,19 @@ def _format_blocks_meta(blocks: List[Tuple[datetime, datetime]]) -> List[dict]:
             "end": end_dt.strftime("%H:%M"),
             "minutes": int((end_dt - start_dt).total_seconds() // 60),
         })
+
     return out
+
+
+def _priority_payload(priority_value) -> dict:
+    priority = normalize_priority(priority_value)
+
+    return {
+        "priority": priority,
+        "priority_label": priority_label(priority),
+        "priority_short_label": priority_short_label(priority),
+        "priority_badge": priority_badge(priority),
+    }
 
 
 def generate_daily_plan(
@@ -206,10 +233,12 @@ def generate_daily_plan(
 
             if current_time >= block_end:
                 block_index += 1
+
                 if block_index < len(blocks):
                     current_time = blocks[block_index][0]
                 else:
                     current_time = None
+
                 continue
 
             return
@@ -243,10 +272,12 @@ def generate_daily_plan(
 
             if available_here <= 0:
                 block_index += 1
+
                 if block_index < len(blocks):
                     current_time = blocks[block_index][0]
                 else:
                     current_time = None
+
                 continue
 
             if remaining <= available_here:
@@ -254,45 +285,58 @@ def generate_daily_plan(
             else:
                 if not allow_split:
                     break
+
                 if available_here < min_split_minutes:
                     block_index += 1
+
                     if block_index < len(blocks):
                         current_time = blocks[block_index][0]
                     else:
                         current_time = None
+
                     continue
+
                 chunk = available_here
 
             split_part_index += 1
+
             part_start = current_time
             part_end = current_time + timedelta(minutes=chunk)
+
+            priority_meta = _priority_payload(t["priority"])
 
             slot = {
                 "task_id": t["id"],
                 "title": t["title"],
-                "priority": int(t["priority"]),
-                "priority_label": _priority_label(int(t["priority"])),
+                "priority": priority_meta["priority"],
+                "priority_label": priority_meta["priority_label"],
+                "priority_short_label": priority_meta["priority_short_label"],
+                "priority_badge": priority_meta["priority_badge"],
                 "deadline": t["deadline"],
                 "start": part_start.strftime("%H:%M"),
                 "end": part_end.strftime("%H:%M"),
                 "duration": chunk,
                 "planned_duration": planned_duration,
                 "predicted_duration": predicted_duration,
-                "used_recommendation": int(t["used_recommendation"]) if "used_recommendation" in t.keys() else 0,
+                "used_recommendation": int(t["used_recommendation"]) if _row_has_key(t, "used_recommendation") else 0,
                 "is_split": False,
                 "part_index": 1,
+                "part_total": 1,
+                "part_label": "",
                 "block_index": block_index + 1,
                 "block_start": block_start.strftime("%H:%M"),
                 "block_end": block_end.strftime("%H:%M"),
             }
 
             scheduled_parts.append(slot)
+
             remaining -= chunk
             current_time = part_end + timedelta(minutes=break_minutes)
 
         if scheduled_parts:
             if len(scheduled_parts) > 1 or remaining > 0:
                 total_parts = len(scheduled_parts) + (1 if remaining > 0 else 0)
+
                 for idx, part in enumerate(scheduled_parts, start=1):
                     part["is_split"] = True
                     part["part_index"] = idx
@@ -303,18 +347,25 @@ def generate_daily_plan(
 
         if remaining > 0:
             task_copy = dict(t)
+            priority_meta = _priority_payload(task_copy["priority"])
+
+            task_copy["priority"] = priority_meta["priority"]
+            task_copy["priority_label"] = priority_meta["priority_label"]
+            task_copy["priority_short_label"] = priority_meta["priority_short_label"]
+            task_copy["priority_badge"] = priority_meta["priority_badge"]
             task_copy["planned_duration"] = planned_duration
             task_copy["predicted_duration"] = predicted_duration
-            task_copy["used_recommendation"] = int(t["used_recommendation"]) if "used_recommendation" in t.keys() else 0
+            task_copy["used_recommendation"] = int(t["used_recommendation"]) if _row_has_key(t, "used_recommendation") else 0
             task_copy["remaining_duration"] = remaining
             task_copy["scheduled_duration"] = total_duration - remaining
             task_copy["is_partial"] = len(scheduled_parts) > 0
+
             unscheduled.append(task_copy)
 
     unscheduled = sorted(
         unscheduled,
         key=lambda task: (
-            -int(task["priority"]),
+            priority_sort_value(task["priority"]),
             str(task["deadline"]),
             int(task["remaining_duration"] if "remaining_duration" in task else task["duration"]),
         ),
