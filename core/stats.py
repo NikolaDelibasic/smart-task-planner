@@ -1,4 +1,5 @@
 from core.database import get_connection
+from core.priority import normalize_priority, priority_label
 
 
 def _clamp(value, min_value, max_value):
@@ -42,13 +43,7 @@ def _build_insights(stats: dict) -> list[str]:
 
     if completed_by_priority:
         top_priority = max(completed_by_priority, key=completed_by_priority.get)
-
-        if top_priority == 3:
-            insights.append("Most of your completed tasks are high-priority tasks.")
-        elif top_priority == 2:
-            insights.append("Most of your completed tasks are medium-priority tasks.")
-        else:
-            insights.append("Most of your completed tasks are low-priority tasks.")
+        insights.append(f"Most of your completed tasks are marked as {priority_label(top_priority)}.")
 
     if active >= 8:
         insights.append("You currently have a large active backlog, which may increase scheduling pressure.")
@@ -63,11 +58,47 @@ def _build_insights(stats: dict) -> list[str]:
     return insights[:5]
 
 
+def _priority_distribution(raw_counts: dict) -> list[dict]:
+    return [
+        {
+            "priority": 1,
+            "label": "Critical",
+            "count": raw_counts.get(1, 0),
+            "badge": "danger",
+        },
+        {
+            "priority": 2,
+            "label": "High",
+            "count": raw_counts.get(2, 0),
+            "badge": "warning",
+        },
+        {
+            "priority": 3,
+            "label": "Normal",
+            "count": raw_counts.get(3, 0),
+            "badge": "primary",
+        },
+        {
+            "priority": 4,
+            "label": "Low",
+            "count": raw_counts.get(4, 0),
+            "badge": "secondary",
+        },
+        {
+            "priority": 5,
+            "label": "Optional",
+            "count": raw_counts.get(5, 0),
+            "badge": "light",
+        },
+    ]
+
+
 def get_basic_stats():
     with get_connection() as conn:
         cur = conn.cursor()
         stats = {}
 
+        # === CURRENT BOARD STATE (tasks) ===
         cur.execute("SELECT COUNT(*) AS count FROM tasks")
         stats["total"] = cur.fetchone()["count"]
 
@@ -80,6 +111,7 @@ def get_basic_stats():
         cur.execute("SELECT COALESCE(SUM(duration), 0) AS total_time FROM tasks")
         stats["total_time"] = cur.fetchone()["total_time"]
 
+        # === LONG-TERM LEARNING / ANALYTICS (task_history) ===
         cur.execute("SELECT COUNT(*) AS count FROM task_history")
         stats["completed"] = cur.fetchone()["count"]
 
@@ -149,10 +181,14 @@ def get_basic_stats():
             GROUP BY priority
             ORDER BY priority ASC
         """)
-        stats["completed_by_priority"] = {
-            row["priority"]: row["count"]
+
+        raw_priority_counts = {
+            normalize_priority(row["priority"]): row["count"]
             for row in cur.fetchall()
         }
+
+        stats["completed_by_priority"] = raw_priority_counts
+        stats["priority_distribution"] = _priority_distribution(raw_priority_counts)
 
     total = stats["total"]
     completed = stats["completed"]

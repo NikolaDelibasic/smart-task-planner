@@ -253,36 +253,28 @@ Track current workload, execution quality, and long-term planning behavior.
             <h3 class="h5 mb-3">Completed Tasks by Priority</h3>
 
             <div class="row g-3">
-                <div class="col-md-4">
+                {% for item in stats.priority_distribution %}
+                <div class="col-md">
                     <div class="metric-card">
-                        <div class="metric-label">High Priority</div>
-                        <div class="metric-value">
-                            {{ stats.completed_by_priority.get(3, 0) }}
-                        </div>
-                        <div class="metric-sub">Completed high-priority tasks.</div>
-                    </div>
-                </div>
+                        <div class="metric-label">{{ item.label }}</div>
 
-                <div class="col-md-4">
-                    <div class="metric-card">
-                        <div class="metric-label">Medium Priority</div>
                         <div class="metric-value">
-                            {{ stats.completed_by_priority.get(2, 0) }}
+                            {{ item.count }}
                         </div>
-                        <div class="metric-sub">Completed medium-priority tasks.</div>
-                    </div>
-                </div>
 
-                <div class="col-md-4">
-                    <div class="metric-card">
-                        <div class="metric-label">Low Priority</div>
-                        <div class="metric-value">
-                            {{ stats.completed_by_priority.get(1, 0) }}
-                        </div>
-                        <div class="metric-sub">Completed low-priority tasks.</div>
+                        <span class="badge text-bg-{{ item.badge }}">
+                            {{ item.label }}
+                        </span>
                     </div>
                 </div>
+                {% endfor %}
             </div>
+
+            {% if not stats.priority_distribution %}
+                <p class="text-muted mb-0">
+                    No completed task history yet.
+                </p>
+            {% endif %}
         </div>
     </div>
 </div>
