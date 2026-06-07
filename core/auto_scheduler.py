@@ -254,12 +254,14 @@ def generate_daily_plan(
         planned_duration, predicted_duration, total_duration = _get_task_duration_meta(t, use_predicted)
 
         if planned_duration <= 0:
-            unscheduled.append(dict(t))
+            task_copy = dict(t)
+            priority_meta = _priority_payload(task_copy["priority"])
+            task_copy.update(priority_meta)
+            unscheduled.append(task_copy)
             continue
 
         remaining = total_duration
         scheduled_parts = []
-        split_part_index = 0
 
         while remaining > 0:
             move_to_next_valid_position()
@@ -297,8 +299,6 @@ def generate_daily_plan(
                     continue
 
                 chunk = available_here
-
-            split_part_index += 1
 
             part_start = current_time
             part_end = current_time + timedelta(minutes=chunk)
