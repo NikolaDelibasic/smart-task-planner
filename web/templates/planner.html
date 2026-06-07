@@ -5,17 +5,40 @@
 {% block page_title %}Daily Planner{% endblock %}
 
 {% block page_subtitle %}
-Automatically generated workday timeline based on smart prioritization, multiple time blocks, and task splitting.
+Create a focused plan using your own available time blocks, AI duration estimates, and task splitting.
 {% endblock %}
 
 {% block content %}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body p-4">
-        <h3 class="h5 mb-3">Planner Settings</h3>
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+            <div>
+                <h3 class="h5 mb-2">Planner Settings</h3>
+                <p class="text-muted mb-0">
+                    Add the time blocks when you are available. The planner will only schedule tasks inside those blocks.
+                </p>
+            </div>
 
-        <form method="GET" action="{{ url_for('planner') }}">
-            <div class="row g-3">
-                <div class="col-md-2">
+            <span class="badge text-bg-primary">
+                Smart Daily Plan
+            </span>
+        </div>
+
+        <div class="task-block mb-4">
+            <h4 class="h6 mb-2">How this planner works</h4>
+
+            <ul class="mb-0 small text-muted">
+                <li>Add at least one valid time block.</li>
+                <li>Tasks are scheduled only inside your selected blocks.</li>
+                <li>Break time is added after each scheduled task.</li>
+                <li>Large tasks can be split across multiple blocks.</li>
+                <li>Critical tasks are scheduled before lower-priority tasks when possible.</li>
+            </ul>
+        </div>
+
+        <form method="GET" action="{{ url_for('planner') }}" id="plannerForm">
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
                     <label for="blockCountInput" class="form-label">Number of Blocks</label>
                     <select
                         id="blockCountInput"
@@ -28,9 +51,12 @@ Automatically generated workday timeline based on smart prioritization, multiple
                             </option>
                         {% endfor %}
                     </select>
+                    <div class="form-text">
+                        Choose how many work sessions you want to plan.
+                    </div>
                 </div>
 
-                <div class="col-md-2">
+                <div class="col-md-3">
                     <label for="breakMinutesInput" class="form-label">Break Minutes</label>
                     <input
                         type="number"
@@ -41,9 +67,12 @@ Automatically generated workday timeline based on smart prioritization, multiple
                         name="break_minutes"
                         value="{{ planner_meta.break_minutes if planner_meta else 10 }}"
                     >
+                    <div class="form-text">
+                        Break added after each scheduled task.
+                    </div>
                 </div>
 
-                <div class="col-md-2">
+                <div class="col-md-3">
                     <label for="minSplitInput" class="form-label">Min Split Size</label>
                     <input
                         type="number"
@@ -54,40 +83,11 @@ Automatically generated workday timeline based on smart prioritization, multiple
                         name="min_split_minutes"
                         value="{{ planner_meta.min_split_minutes if planner_meta else 15 }}"
                     >
-                </div>
-
-                <div class="col-md-3">
-                    <label for="availableMinutesInput" class="form-label">Fallback Available Minutes</label>
-                    <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        class="form-control"
-                        id="availableMinutesInput"
-                        name="available_minutes"
-                        value="{{ planner_meta.available_minutes if planner_meta else 480 }}"
-                    >
                     <div class="form-text">
-                        Used only if no valid blocks are entered.
+                        Smallest allowed chunk for split tasks.
                     </div>
                 </div>
 
-                <div class="col-md-3">
-                    <label for="startTimeInput" class="form-label">Fallback Start Time</label>
-                    <input
-                        type="time"
-                        class="form-control"
-                        id="startTimeInput"
-                        name="start_time"
-                        value="{{ planner_meta.start_time if planner_meta else '09:00' }}"
-                    >
-                    <div class="form-text">
-                        Used only if no valid blocks are entered.
-                    </div>
-                </div>
-            </div>
-
-            <div class="row g-3 mt-1">
                 <div class="col-md-3">
                     <label class="form-label">AI Duration</label>
                     <select name="use_predicted" class="form-select">
@@ -98,8 +98,13 @@ Automatically generated workday timeline based on smart prioritization, multiple
                             Disabled
                         </option>
                     </select>
+                    <div class="form-text">
+                        Use Smart Assistant time estimates.
+                    </div>
                 </div>
+            </div>
 
+            <div class="row g-3 mb-4">
                 <div class="col-md-3">
                     <label class="form-label">Task Splitting</label>
                     <select name="allow_split" class="form-select">
@@ -110,61 +115,87 @@ Automatically generated workday timeline based on smart prioritization, multiple
                             Disabled
                         </option>
                     </select>
+                    <div class="form-text">
+                        Allows large tasks to be split across blocks.
+                    </div>
                 </div>
 
-                <div class="col-md-6 d-flex align-items-end">
+                <div class="col-md-9 d-flex align-items-end">
                     <button type="submit" class="btn btn-primary w-100">
                         Generate Plan
                     </button>
                 </div>
             </div>
 
-            <div class="row g-3 mt-3" id="plannerBlocks">
-                {% for i in range(1, max_planner_blocks + 1) %}
-                <div
-                    class="col-md-6 planner-block-row"
-                    data-block-row="{{ i }}"
-                    {% if i > planner_block_count %}style="display: none;"{% endif %}
-                >
-                    <div class="task-block">
-                        <h4 class="h6 mb-3">Block {{ i }}</h4>
-
-                        <div class="row g-3">
-                            <div class="col-6">
-                                <label for="block{{ i }}Start" class="form-label">Start</label>
-                                <input
-                                    type="time"
-                                    class="form-control"
-                                    id="block{{ i }}Start"
-                                    name="block_{{ i }}_start"
-                                    value="{{ planner_block_fields['block_' ~ i ~ '_start'] }}"
-                                >
-                            </div>
-
-                            <div class="col-6">
-                                <label for="block{{ i }}End" class="form-label">End</label>
-                                <input
-                                    type="time"
-                                    class="form-control"
-                                    id="block{{ i }}End"
-                                    name="block_{{ i }}_end"
-                                    value="{{ planner_block_fields['block_' ~ i ~ '_end'] }}"
-                                >
-                            </div>
-                        </div>
-
-                        <div class="form-text mt-2">
-                            Enter the working interval for block {{ i }}.
+            <div class="task-block mb-3">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                    <div>
+                        <h4 class="h6 mb-1">Available Time Blocks</h4>
+                        <div class="small text-muted">
+                            Enter a start and end time for each selected block.
                         </div>
                     </div>
+
+                    <span class="badge text-bg-secondary">
+                        Required
+                    </span>
                 </div>
-                {% endfor %}
+
+                <div class="row g-3" id="plannerBlocks">
+                    {% for i in range(1, max_planner_blocks + 1) %}
+                    <div
+                        class="col-lg-6 planner-block-row"
+                        data-block-row="{{ i }}"
+                        {% if i > planner_block_count %}style="display: none;"{% endif %}
+                    >
+                        <div class="task-block h-100">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="h6 mb-0">Block {{ i }}</h5>
+
+                                <span class="badge text-bg-secondary">
+                                    Session {{ i }}
+                                </span>
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-6">
+                                    <label for="block{{ i }}Start" class="form-label">Start</label>
+                                    <input
+                                        type="time"
+                                        class="form-control planner-block-start"
+                                        id="block{{ i }}Start"
+                                        name="block_{{ i }}_start"
+                                        data-block-index="{{ i }}"
+                                        value="{{ planner_block_fields['block_' ~ i ~ '_start'] }}"
+                                    >
+                                </div>
+
+                                <div class="col-6">
+                                    <label for="block{{ i }}End" class="form-label">End</label>
+                                    <input
+                                        type="time"
+                                        class="form-control planner-block-end"
+                                        id="block{{ i }}End"
+                                        name="block_{{ i }}_end"
+                                        data-block-index="{{ i }}"
+                                        value="{{ planner_block_fields['block_' ~ i ~ '_end'] }}"
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="form-text mt-2">
+                                Example: 09:00–10:30
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
             </div>
         </form>
     </div>
 </div>
 
-{% if planner_meta %}
+{% if planner_meta and planner_meta.has_valid_blocks %}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body p-4">
         <h3 class="h5 mb-3">Planner Summary</h3>
@@ -236,9 +267,12 @@ Automatically generated workday timeline based on smart prioritization, multiple
     <div class="card-body p-4">
         <h3 class="h5 mb-3">
             Scheduled Timeline
-            <span class="text-muted">
-                {{ planner_meta.start_time if planner_meta else "09:00" }}–{{ planner_meta.end_time if planner_meta else "17:00" }}
-            </span>
+
+            {% if planner_meta and planner_meta.has_valid_blocks %}
+                <span class="text-muted">
+                    {{ planner_meta.start_time }}–{{ planner_meta.end_time }}
+                </span>
+            {% endif %}
         </h3>
 
         {% if schedule %}
@@ -253,6 +287,7 @@ Automatically generated workday timeline based on smart prioritization, multiple
 
                             <h4 class="h6 mb-2">
                                 {{ item.title }}
+
                                 {% if item.is_split %}
                                     <span class="text-muted">· {{ item.part_label }}</span>
                                 {% endif %}
@@ -286,6 +321,7 @@ Automatically generated workday timeline based on smart prioritization, multiple
 
                         <div class="text-end">
                             <span class="badge text-bg-success">Scheduled</span>
+
                             <div class="small text-muted mt-2">
                                 {{ item.start }} - {{ item.end }}
                             </div>
@@ -294,14 +330,19 @@ Automatically generated workday timeline based on smart prioritization, multiple
                 </div>
                 {% endfor %}
             </div>
-        {% else %}
+        {% elif planner_meta and planner_meta.has_valid_blocks %}
             <p class="text-muted mb-0">
                 No active tasks could be scheduled for the selected planning window.
+            </p>
+        {% else %}
+            <p class="text-muted mb-0">
+                Enter at least one valid time block to generate a timeline.
             </p>
         {% endif %}
     </div>
 </div>
 
+{% if planner_meta and planner_meta.has_valid_blocks %}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body p-4">
         <h3 class="h5 mb-3">Unscheduled Tasks</h3>
@@ -358,25 +399,12 @@ Automatically generated workday timeline based on smart prioritization, multiple
         {% endif %}
     </div>
 </div>
-
-<div class="card border-0 shadow-sm">
-    <div class="card-body p-4">
-        <h3 class="h5 mb-3">Planning Rules</h3>
-
-        <ul class="mb-0">
-            <li>Supports multiple custom time blocks.</li>
-            <li>Falls back to one block if no valid blocks are entered.</li>
-            <li>Break between tasks is configurable.</li>
-            <li>AI-based duration can be enabled or disabled.</li>
-            <li>Large tasks can be split across blocks.</li>
-            <li>Critical tasks are scheduled before lower-priority tasks when possible.</li>
-        </ul>
-    </div>
-</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
+const plannerForm = document.getElementById("plannerForm");
 const blockCountInput = document.getElementById("blockCountInput");
 
 function updatePlannerBlockVisibility() {
@@ -384,11 +412,77 @@ function updatePlannerBlockVisibility() {
 
     document.querySelectorAll(".planner-block-row").forEach((row) => {
         const index = Number(row.dataset.blockRow || 1);
-        row.style.display = index <= count ? "" : "none";
+        const isVisible = index <= count;
+
+        row.style.display = isVisible ? "" : "none";
+
+        row.querySelectorAll("input").forEach((input) => {
+            input.required = isVisible;
+            input.disabled = !isVisible;
+
+            if (!isVisible) {
+                input.setCustomValidity("");
+            }
+        });
     });
 }
 
-blockCountInput?.addEventListener("change", updatePlannerBlockVisibility);
+function validatePlannerBlocks() {
+    const count = Number(blockCountInput?.value || 1);
+    let isValid = true;
+
+    for (let i = 1; i <= count; i++) {
+        const startInput = document.getElementById(`block${i}Start`);
+        const endInput = document.getElementById(`block${i}End`);
+
+        if (!startInput || !endInput) {
+            continue;
+        }
+
+        startInput.setCustomValidity("");
+        endInput.setCustomValidity("");
+
+        if (!startInput.value) {
+            startInput.setCustomValidity("Please enter a start time for this block.");
+            isValid = false;
+            continue;
+        }
+
+        if (!endInput.value) {
+            endInput.setCustomValidity("Please enter an end time for this block.");
+            isValid = false;
+            continue;
+        }
+
+        if (endInput.value <= startInput.value) {
+            endInput.setCustomValidity("End time must be after start time.");
+            isValid = false;
+        }
+    }
+
+    return isValid;
+}
+
+blockCountInput?.addEventListener("change", () => {
+    updatePlannerBlockVisibility();
+    validatePlannerBlocks();
+});
+
+document.querySelectorAll(".planner-block-start, .planner-block-end").forEach((input) => {
+    input.addEventListener("input", validatePlannerBlocks);
+    input.addEventListener("change", validatePlannerBlocks);
+});
+
+plannerForm?.addEventListener("submit", (event) => {
+    updatePlannerBlockVisibility();
+
+    if (!validatePlannerBlocks()) {
+        event.preventDefault();
+        plannerForm.reportValidity();
+    }
+});
+
 updatePlannerBlockVisibility();
+validatePlannerBlocks();
 </script>
 {% endblock %}

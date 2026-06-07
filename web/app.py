@@ -30,7 +30,7 @@ from core.workload import analyze_workload
 app = Flask(__name__)
 init_db()
 
-MAX_PLANNER_BLOCKS = 5
+MAX_PLANNER_BLOCKS = 10
 
 
 def _safe_parse_task_date(deadline_value: str):
@@ -477,13 +477,6 @@ def planner():
     tasks = _decorate_tasks(get_active_tasks())
     workload = analyze_workload(tasks)
 
-    start_time = request.args.get("start_time", "09:00").strip()
-
-    try:
-        available_minutes = int(request.args.get("available_minutes", "480"))
-    except ValueError:
-        available_minutes = 480
-
     try:
         break_minutes = int(request.args.get("break_minutes", "10"))
     except ValueError:
@@ -513,8 +506,6 @@ def planner():
     schedule, unscheduled, planner_meta = generate_daily_plan(
         tasks,
         use_predicted=use_predicted,
-        start_time=start_time,
-        available_minutes=available_minutes,
         break_minutes=break_minutes,
         time_blocks=time_blocks,
         allow_split=allow_split,
