@@ -90,7 +90,10 @@ def _create_core_tables(cursor):
             actual_duration INTEGER,
             completed_at TEXT,
             used_recommendation INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            repeat_type TEXT DEFAULT 'none',
+            repeat_interval INTEGER DEFAULT 1,
+            recurring_parent_id INTEGER
         )
     """)
 
@@ -151,6 +154,9 @@ def _migrate_tasks_table(cursor):
     _add_column_if_missing(cursor, "tasks", "completed_at TEXT")
     _add_column_if_missing(cursor, "tasks", "used_recommendation INTEGER DEFAULT 0")
     _add_column_if_missing(cursor, "tasks", "created_at TEXT")
+    _add_column_if_missing(cursor, "tasks", "repeat_type TEXT DEFAULT 'none'")
+    _add_column_if_missing(cursor, "tasks", "repeat_interval INTEGER DEFAULT 1")
+    _add_column_if_missing(cursor, "tasks", "recurring_parent_id INTEGER")
 
     cursor.execute("""
         UPDATE tasks
@@ -210,6 +216,20 @@ def _migrate_task_history_table(cursor):
         UPDATE task_history
         SET weekend_deadline = 0
         WHERE weekend_deadline IS NULL
+    """)
+
+    cursor.execute("""
+    UPDATE tasks
+    SET repeat_type = 'none'
+    WHERE repeat_type IS NULL
+       OR repeat_type = ''
+    """)
+
+    cursor.execute("""
+    UPDATE tasks
+    SET repeat_interval = 1
+    WHERE repeat_interval IS NULL
+       OR repeat_interval < 1
     """)
 
 

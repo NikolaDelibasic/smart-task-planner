@@ -1,118 +1,259 @@
 from datetime import datetime
 
 from core.database import get_connection
-from core.ml_model import calculate_duration_features, retrain_duration_model
-from core.risk_model import retrain_risk_models
+from core.priority import normalize_priority
+from core.recurring import (
+    get_next_deadline,
+    normalize_repeat_interval,
+    normalize_repeat_type,
+)
 
 
-def add_task(title, priority, deadline, duration, used_recommendation=0):
-    created_at = datetime.now().isoformat(timespec="seconds")
+def _safe_int(value, default=0):
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
-    with get_connection() as conn:
-        cur = conn.cursor()
 
-        cur.execute(
+def _safe_calculate_duration_features(priority, planned_duration, deadline, completed_at):
+    """
+    Keeps task_manager compatible if calculate_duration_features changes slightly.
+    """
+    try:
+        from core.ml_model import calculate_duration_features
+
+        try:
+            return calculate_duration_features(
+                priority=priority,
+                planned_duration=planned_duration,
+                deadline=deadline,
+                completed_at=completed_at,
+            )
+        except TypeError:
+            try:
+                return calculate_duration_features(
+                    priority=priority,
+                    planned_duration=planned_duration,
+                    deadline=deadline,
+                )
+            except TypeError:
+                return calculate_duration_features(
+                    planned_duration,
+                    priority,
+                    deadline,
+                )
+
+    except Exception:
+        return {
+            "days_to_deadline": 0,
+            "weekend_deadline": 0,
+        }
+
+
+def _retrain_models_safely():
+    try:
+        from core.ml_model import retrain_duration_model
+        retrain_duration_model()
+    except Exception:
+        pass
+
+    try:
+        from core.risk_model import retrain_risk_models
+        retrain_risk_models()
+    except Exception:
+        pass
+
+
+def add_task(
+    title,
+    priority,
+    deadline,
+    duration,
+    used_recommendation=0,
+    repeat_type="none",
+    repeat_interval=1,
+    recurring_parent_id=None,
+):
+    priority = normalize_priority(priority)
+    duration = _safe_int(duration)
+    used_recommendation = 1 if _safe_int(used_recommendation) else 0
+    repeat_type = normalize_repeat_type(repeat_type)
+    repeat_interval = normalize_repeat_interval(repeat_interval)
+
+    conn = get_connection()
+
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute(
             """
             INSERT INTO tasks (
                 title,
                 priority,
                 deadline,
                 duration,
+                status,
                 used_recommendation,
-                created_at
+                created_at,
+                repeat_type,
+                repeat_interval,
+                recurring_parent_id
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, ?, ?, ?)
             """,
             (
-                str(title).strip(),
-                int(priority),
-                str(deadline).strip(),
-                int(duration),
-                int(used_recommendation),
-                created_at,
+                title,
+                priority,
+                deadline,
+                duration,
+                used_recommendation,
+                repeat_type,
+                repeat_interval,
+                recurring_parent_id,
             ),
+        )
+
+        task_id = cursor.lastrowid
+
+        if recurring_parent_id is None and repeat_type != "none":
+            cursor.execute(
+                """
+                UPDATE tasks
+                SET recurring_parent_id = ?
+                WHERE id = ?
+                """,
+                (task_id, task_id),
+            )
+
+        conn.commit()
+        return task_id
+
+    finally:
+        conn.close()
+
+
+def get_all_tasks():
+    conn = get_connection()
+
+    try:
+        return conn.execute(
+            """
+            SELECT *
+            FROM tasks
+            ORDER BY
+                CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
+                id DESC
+            """
+        ).fetchall()
+
+    finally:
+        conn.close()
+
+
+def get_active_tasks():
+    conn = get_connection()
+
+    try:
+        return conn.execute(
+            """
+            SELECT *
+            FROM tasks
+            WHERE status != 'completed'
+            ORDER BY id DESC
+            """
+        ).fetchall()
+
+    finally:
+        conn.close()
+
+
+def get_completed_tasks():
+    conn = get_connection()
+
+    try:
+        return conn.execute(
+            """
+            SELECT *
+            FROM tasks
+            WHERE status = 'completed'
+            ORDER BY completed_at DESC, id DESC
+            """
+        ).fetchall()
+
+    finally:
+        conn.close()
+
+
+def get_tasks_by_date_range(start_date, end_date):
+    conn = get_connection()
+
+    try:
+        return conn.execute(
+            """
+            SELECT *
+            FROM tasks
+            WHERE date(deadline) >= date(?)
+              AND date(deadline) < date(?)
+            ORDER BY id DESC
+            """,
+            (start_date, end_date),
+        ).fetchall()
+
+    finally:
+        conn.close()
+
+
+def delete_task(task_id):
+    conn = get_connection()
+
+    try:
+        conn.execute(
+            """
+            DELETE FROM tasks
+            WHERE id = ?
+            """,
+            (task_id,),
         )
 
         conn.commit()
 
-
-def _safe_datetime_date(value: str | None):
-    if not value:
-        return datetime.now().date()
-
-    try:
-        return datetime.fromisoformat(str(value)).date()
-    except Exception:
-        return datetime.now().date()
+    finally:
+        conn.close()
 
 
-def _history_exists_for_task(cursor, task, actual_duration: int, completed_at: str) -> bool:
-    task_id = int(task["id"])
+def _insert_task_history(conn, task, actual_duration, completed_at):
+    priority = normalize_priority(task["priority"])
+    planned_duration = _safe_int(task["duration"])
+    actual_duration = _safe_int(actual_duration)
 
-    cursor.execute(
+    features = _safe_calculate_duration_features(
+        priority=priority,
+        planned_duration=planned_duration,
+        deadline=task["deadline"],
+        completed_at=completed_at,
+    )
+
+    days_to_deadline = _safe_int(features.get("days_to_deadline"))
+    weekend_deadline = _safe_int(features.get("weekend_deadline"))
+
+    existing = conn.execute(
         """
         SELECT id
         FROM task_history
         WHERE source_task_id = ?
+          AND COALESCE(is_seed, 0) = 0
         LIMIT 1
         """,
-        (task_id,),
-    )
+        (task["id"],),
+    ).fetchone()
 
-    if cursor.fetchone() is not None:
-        return True
+    if existing:
+        return
 
-    cursor.execute(
-        """
-        SELECT id
-        FROM task_history
-        WHERE source_task_id IS NULL
-          AND title = ?
-          AND priority = ?
-          AND planned_duration = ?
-          AND actual_duration = ?
-          AND deadline = ?
-          AND completed_at = ?
-        LIMIT 1
-        """,
-        (
-            task["title"],
-            int(task["priority"]),
-            int(task["duration"]),
-            int(actual_duration),
-            task["deadline"],
-            completed_at,
-        ),
-    )
-
-    return cursor.fetchone() is not None
-
-
-def _insert_task_history(cursor, task, actual_duration: int, completed_at: str) -> bool:
-    if task is None:
-        return False
-
-    if _history_exists_for_task(
-        cursor=cursor,
-        task=task,
-        actual_duration=int(actual_duration),
-        completed_at=completed_at,
-    ):
-        return False
-
-    task_id = int(task["id"])
-
-    created_at = task["created_at"] or completed_at
-    created_date = _safe_datetime_date(created_at)
-
-    features = calculate_duration_features(
-        planned_duration=int(task["duration"]),
-        priority=int(task["priority"]),
-        deadline=str(task["deadline"]),
-        reference_date=created_date,
-    )
-
-    cursor.execute(
+    conn.execute(
         """
         INSERT INTO task_history (
             source_task_id,
@@ -124,104 +265,116 @@ def _insert_task_history(cursor, task, actual_duration: int, completed_at: str) 
             days_to_deadline,
             weekend_deadline,
             completed_at,
-            created_at
+            created_at,
+            is_seed
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 0)
         """,
         (
-            task_id,
+            task["id"],
             task["title"],
-            int(task["priority"]),
-            int(task["duration"]),
-            int(actual_duration),
+            priority,
+            planned_duration,
+            actual_duration,
             task["deadline"],
-            int(features["days_to_deadline"]),
-            int(features["weekend_deadline"]),
+            days_to_deadline,
+            weekend_deadline,
             completed_at,
-            created_at,
         ),
     )
 
-    return True
+
+def _create_next_recurring_task(conn, task):
+    repeat_type = normalize_repeat_type(task["repeat_type"])
+    repeat_interval = normalize_repeat_interval(task["repeat_interval"])
+
+    if repeat_type == "none":
+        return None
+
+    next_deadline = get_next_deadline(
+        deadline=task["deadline"],
+        repeat_type=repeat_type,
+        repeat_interval=repeat_interval,
+    )
+
+    if not next_deadline:
+        return None
+
+    parent_id = task["recurring_parent_id"] or task["id"]
+
+    existing_next = conn.execute(
+        """
+        SELECT id
+        FROM tasks
+        WHERE recurring_parent_id = ?
+          AND deadline = ?
+          AND status != 'completed'
+        LIMIT 1
+        """,
+        (parent_id, next_deadline),
+    ).fetchone()
+
+    if existing_next:
+        return existing_next["id"]
+
+    cursor = conn.execute(
+        """
+        INSERT INTO tasks (
+            title,
+            priority,
+            deadline,
+            duration,
+            status,
+            used_recommendation,
+            created_at,
+            repeat_type,
+            repeat_interval,
+            recurring_parent_id
+        )
+        VALUES (?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, ?, ?, ?)
+        """,
+        (
+            task["title"],
+            normalize_priority(task["priority"]),
+            next_deadline,
+            _safe_int(task["duration"]),
+            _safe_int(task["used_recommendation"]),
+            repeat_type,
+            repeat_interval,
+            parent_id,
+        ),
+    )
+
+    return cursor.lastrowid
 
 
-def _retrain_ai_models():
-    retrain_duration_model()
-    retrain_risk_models()
+def mark_completed(task_id, actual_duration):
+    actual_duration = _safe_int(actual_duration)
 
+    if actual_duration <= 0:
+        raise ValueError("Actual duration must be greater than 0.")
 
-def get_all_tasks():
-    with get_connection() as conn:
-        cur = conn.cursor()
+    conn = get_connection()
 
-        cur.execute(
+    try:
+        task = conn.execute(
             """
             SELECT *
             FROM tasks
-            ORDER BY
-                CASE WHEN status != 'completed' THEN 0 ELSE 1 END ASC,
-                CASE WHEN status != 'completed' THEN datetime(created_at) END DESC,
-                CASE WHEN status = 'completed' THEN datetime(completed_at) END DESC,
-                id DESC
-            """
-        )
+            WHERE id = ?
+            """,
+            (task_id,),
+        ).fetchone()
 
-        return cur.fetchall()
+        if not task:
+            return None
 
-
-def delete_task(task_id):
-    should_retrain = False
-
-    with get_connection() as conn:
-        cur = conn.cursor()
-
-        cur.execute(
-            "SELECT * FROM tasks WHERE id = ?",
-            (int(task_id),),
-        )
-
-        task = cur.fetchone()
-
-        if task and task["status"] == "completed" and task["actual_duration"]:
-            completed_at = task["completed_at"] or datetime.now().isoformat(timespec="seconds")
-
-            should_retrain = _insert_task_history(
-                cursor=cur,
-                task=task,
-                actual_duration=int(task["actual_duration"]),
-                completed_at=completed_at,
-            )
-
-        cur.execute(
-            "DELETE FROM tasks WHERE id = ?",
-            (int(task_id),),
-        )
-
-        conn.commit()
-
-    if should_retrain:
-        _retrain_ai_models()
-
-
-def mark_completed(task_id, actual_duration: int):
-    should_retrain = False
-
-    with get_connection() as conn:
-        cur = conn.cursor()
-
-        cur.execute(
-            "SELECT * FROM tasks WHERE id = ?",
-            (int(task_id),),
-        )
-
-        task = cur.fetchone()
-
-        if task is None:
-            return
+        if task["status"] == "completed":
+            return None
 
         completed_at = datetime.now().isoformat(timespec="seconds")
 
-        cur.execute(
+        conn.execute(
             """
             UPDATE tasks
             SET status = 'completed',
@@ -230,75 +383,32 @@ def mark_completed(task_id, actual_duration: int):
             WHERE id = ?
             """,
             (
-                int(actual_duration),
+                actual_duration,
                 completed_at,
-                int(task_id),
+                task_id,
             ),
         )
 
-        should_retrain = _insert_task_history(
-            cursor=cur,
+        _insert_task_history(
+            conn=conn,
             task=task,
-            actual_duration=int(actual_duration),
+            actual_duration=actual_duration,
             completed_at=completed_at,
+        )
+
+        next_task_id = _create_next_recurring_task(
+            conn=conn,
+            task=task,
         )
 
         conn.commit()
 
-    if should_retrain:
-        _retrain_ai_models()
+    finally:
+        conn.close()
 
+    _retrain_models_safely()
 
-def get_active_tasks():
-    with get_connection() as conn:
-        cur = conn.cursor()
-
-        cur.execute(
-            """
-            SELECT *
-            FROM tasks
-            WHERE status != 'completed'
-            ORDER BY datetime(created_at) DESC, id DESC
-            """
-        )
-
-        return cur.fetchall()
-
-
-def get_completed_tasks():
-    with get_connection() as conn:
-        cur = conn.cursor()
-
-        cur.execute(
-            """
-            SELECT *
-            FROM tasks
-            WHERE status = 'completed'
-            ORDER BY datetime(completed_at) DESC, id DESC
-            """
-        )
-
-        return cur.fetchall()
-
-
-def get_tasks_by_date_range(start_date: str, end_date: str):
-    with get_connection() as conn:
-        cur = conn.cursor()
-
-        cur.execute(
-            """
-            SELECT *
-            FROM tasks
-            WHERE substr(deadline, 1, 10) >= ?
-              AND substr(deadline, 1, 10) < ?
-            ORDER BY
-                CASE WHEN status != 'completed' THEN 0 ELSE 1 END ASC,
-                priority DESC,
-                duration ASC,
-                datetime(created_at) DESC,
-                id DESC
-            """,
-            (start_date, end_date),
-        )
-
-        return cur.fetchall()
+    return {
+        "completed_task_id": task_id,
+        "next_task_id": next_task_id,
+    }

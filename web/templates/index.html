@@ -1,30 +1,83 @@
 {% extends "base.html" %}
 
-{% block title %}{{ title or "Tasks" }} · {{ app_name }}{% endblock %}
+{% block title %}{{ title }} · {{ app_name }}{% endblock %}
 
-{% block page_title %}{{ title or "Tasks" }}{% endblock %}
+{% block page_title %}{{ title }}{% endblock %}
 
 {% block page_subtitle %}
-Create, prioritize, and manage tasks with smart recommendations and risk analysis.
+Manage your tasks, deadlines, AI duration recommendations, priority levels, and recurring work.
 {% endblock %}
 
 {% block content %}
+
+{% if workload and workload.level != "none" %}
+<div class="alert {% if workload.level == 'high' %}alert-danger{% else %}alert-warning{% endif %} shadow-sm mb-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+        <div>
+            <h3 class="h5 mb-2">
+                {% if workload.level == "high" %}
+                    Workload Warning
+                {% else %}
+                    Workload Notice
+                {% endif %}
+            </h3>
+
+            <p class="mb-2">
+                Utilization: {{ workload.utilization }}%
+                · Active tasks: {{ workload.active_count }}
+                · Total planned: {{ workload.total_minutes }} min
+                · Urgent tasks: {{ workload.urgent_count }}
+                · High-risk tasks: {{ workload.risk_count }}
+            </p>
+
+            {% if workload.warnings %}
+                <ul class="mb-0">
+                    {% for warning in workload.warnings %}
+                        <li>{{ warning }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+
+        <span class="badge {% if workload.level == 'high' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
+            {% if workload.level == "high" %}
+                High Pressure
+            {% else %}
+                Monitor Workload
+            {% endif %}
+        </span>
+    </div>
+</div>
+{% endif %}
+
+{% if active_page in ["all", "active"] %}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body p-4">
-        <h3 class="h5 mb-3">Add New Task</h3>
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+            <div>
+                <h3 class="h5 mb-2">Add New Task</h3>
+                <p class="text-muted mb-0">
+                    Enter task details and optionally use the Smart Assistant recommendation.
+                </p>
+            </div>
 
-        <form method="POST" action="{{ url_for('add') }}" id="taskForm">
+            <span class="badge text-bg-primary">
+                Smart Assistant Ready
+            </span>
+        </div>
+
+        <form method="POST" action="{{ url_for('add') }}" id="addTaskForm">
             <input type="hidden" name="used_recommendation" id="usedRecommendationInput" value="0">
 
             <div class="row g-3">
                 <div class="col-lg-4">
-                    <label for="titleInput" class="form-label">Title</label>
+                    <label for="titleInput" class="form-label">Task Title</label>
                     <input
                         type="text"
                         class="form-control"
                         id="titleInput"
                         name="title"
-                        placeholder="Example: Finish project chapter"
+                        placeholder="Example: Finish project section"
                         required
                     >
                 </div>
@@ -56,430 +109,502 @@ Create, prioritize, and manage tasks with smart recommendations and risk analysi
                     >
                 </div>
 
-                <div class="col-lg-2">
-                    <label for="durationInput" class="form-label">Duration (min)</label>
-                    <input
-                        type="number"
-                        class="form-control"
-                        id="durationInput"
-                        name="duration"
-                        min="1"
-                        step="1"
-                        placeholder="60"
-                        required
-                    >
-                </div>
-
-                <div class="col-lg-1 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary w-100">
-                        Add
-                    </button>
+                <div class="col-lg-3">
+                    <label for="durationInput" class="form-label">Planned Duration</label>
+                    <div class="input-group">
+                        <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            class="form-control"
+                            id="durationInput"
+                            name="duration"
+                            placeholder="60"
+                            required
+                        >
+                        <span class="input-group-text">min</span>
+                    </div>
                 </div>
             </div>
-        </form>
 
-        <div class="task-block risk-box mt-4">
-    <div id="recText">
-        Smart Assistant: enter priority, deadline and duration to get a suggestion.
-    </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-6">
+                    <label for="repeatTypeInput" class="form-label">Repeat</label>
+                    <select
+                        class="form-select"
+                        id="repeatTypeInput"
+                        name="repeat_type"
+                    >
+                        <option value="none" selected>No repeat</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+                    <div class="form-text">
+                        Automatically creates the next task after completion.
+                    </div>
+                </div>
 
-    <div id="riskText" class="mt-2"></div>
+                <div class="col-md-6">
+                    <label for="repeatIntervalInput" class="form-label">Repeat Every</label>
+                    <input
+                        type="number"
+                        min="1"
+                        max="365"
+                        step="1"
+                        class="form-control"
+                        id="repeatIntervalInput"
+                        name="repeat_interval"
+                        value="1"
+                    >
+                    <div class="form-text" id="repeatIntervalHelp">
+                        Used only when repeat is enabled.
+                    </div>
+                </div>
+            </div>
 
-    <button
-        type="button"
-        class="btn btn-sm smart-action-btn mt-3"
-        id="useRecommendationBtn"
-        disabled
-    >
-        Use recommended
-    </button>
-</div>
-    </div>
-</div>
+            <div class="task-block risk-box mt-4" id="assistantBox">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                    <div>
+                        <h4 class="h6 mb-2">Smart Assistant</h4>
+                        <p class="text-muted mb-0" id="assistantMessage">
+                            Enter priority, deadline, and planned duration to get a recommendation.
+                        </p>
+                    </div>
 
-<div class="d-flex flex-wrap gap-2 mb-4">
-    <a class="btn btn-sm {% if active_page == 'all' %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ url_for('home') }}">
-        All
-    </a>
+                    <button
+                        type="button"
+                        class="btn smart-action-btn"
+                        id="useRecommendedBtn"
+                        disabled
+                    >
+                        Use Recommended
+                    </button>
+                </div>
 
-    <a class="btn btn-sm {% if active_page == 'active' %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ url_for('active') }}">
-        Active
-    </a>
+                <div class="row g-3 mt-3 d-none" id="assistantDetails">
+                    <div class="col-md-3">
+                        <div class="small text-muted">Recommended Time</div>
+                        <div class="h5 mb-0">
+                            <span id="recommendedMinutes">0</span> min
+                        </div>
+                    </div>
 
-    <a class="btn btn-sm {% if active_page == 'done' %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ url_for('done_view') }}">
-        Completed
-    </a>
+                    <div class="col-md-3">
+                        <div class="small text-muted">Confidence</div>
+                        <div class="h6 mb-0" id="confidenceText">-</div>
+                    </div>
 
-    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('suggest') }}">
-        Suggested Order
-    </a>
+                    <div class="col-md-3">
+                        <div class="small text-muted">Time Risk</div>
+                        <span class="badge text-bg-secondary" id="timeRiskBadge">-</span>
+                    </div>
 
-    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('planner') }}">
-        Daily Planner
-    </a>
+                    <div class="col-md-3">
+                        <div class="small text-muted">Deadline Risk</div>
+                        <span class="badge text-bg-secondary" id="deadlineRiskBadge">-</span>
+                    </div>
 
-    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('stats') }}">
-        Statistics
-    </a>
-</div>
+                    <div class="col-12">
+                        <div class="small text-muted mb-2">Suggestion</div>
+                        <div id="assistantSuggestion" class="small"></div>
+                    </div>
+                </div>
+            </div>
 
-<div class="card border-0 shadow-sm mb-4">
-    <div class="card-body p-4">
-        <h3 class="h5 mb-3">Quick Views</h3>
-
-        <div class="d-flex flex-wrap gap-2 align-items-center">
-            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('view', mode='today') }}">
-                Today
-            </a>
-
-            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('view', mode='week') }}">
-                This Week
-            </a>
-
-            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('view', mode='month') }}">
-                This Month
-            </a>
-
-            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('view', mode='year') }}">
-                This Year
-            </a>
-
-            <form method="GET" action="{{ url_for('view') }}" class="d-flex gap-2 ms-lg-3">
-                <input type="date" class="form-control form-control-sm" name="date" required>
-
-                <button class="btn btn-sm btn-primary" type="submit">
-                    Go
+            <div class="d-flex flex-wrap gap-2 mt-4">
+                <button type="submit" class="btn btn-primary">
+                    Add Task
                 </button>
-            </form>
-        </div>
+
+                <button type="reset" class="btn btn-outline-secondary" id="resetFormBtn">
+                    Clear
+                </button>
+            </div>
+        </form>
     </div>
-</div>
-
-{% if workload and workload.level != "none" %}
-<div class="alert {% if workload.level == 'high' %}alert-danger{% else %}alert-warning{% endif %} shadow-sm">
-    <h3 class="h5">
-        {% if workload.level == "high" %}
-            Overload Warning
-        {% else %}
-            Workload Notice
-        {% endif %}
-    </h3>
-
-    <p class="mb-2">
-        Workload utilization: {{ workload.utilization }}%
-        · Active tasks: {{ workload.active_count }}
-        · Urgent tasks: {{ workload.urgent_count }}
-        · High-risk tasks: {{ workload.risk_count }}
-    </p>
-
-    {% if workload.warnings %}
-        <ul class="mb-2">
-            {% for warning in workload.warnings %}
-                <li>{{ warning }}</li>
-            {% endfor %}
-        </ul>
-    {% endif %}
-
-    <span class="badge {% if workload.level == 'high' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
-        {% if workload.level == "high" %}
-            High Pressure
-        {% else %}
-            Monitor Workload
-        {% endif %}
-    </span>
 </div>
 {% endif %}
 
-{% if tasks %}
 <div class="card border-0 shadow-sm">
     <div class="card-body p-4">
-        <div class="table-responsive">
-            <table class="table align-middle">
-                <thead>
-                    <tr>
-                        <th>Task</th>
-                        <th>Priority</th>
-                        <th>Planned</th>
-                        <th>Actual</th>
-                        <th>Δ</th>
-                        <th>Status</th>
-                        <th class="text-end">Actions</th>
-                    </tr>
-                </thead>
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+            <div>
+                <h3 class="h5 mb-2">{{ title }}</h3>
+                <p class="text-muted mb-0">
+                    {% if tasks %}
+                        Showing {{ tasks|length }} task{% if tasks|length != 1 %}s{% endif %}.
+                    {% else %}
+                        No tasks to show.
+                    {% endif %}
+                </p>
+            </div>
 
-                <tbody>
-                    {% for t in tasks %}
-                    <tr>
-                        <td>
-                            <div class="fw-semibold">{{ t["title"] }}</div>
+            <div class="d-flex flex-wrap gap-2">
+                <a
+                    href="{{ url_for('home') }}"
+                    class="btn btn-sm {% if active_page == 'all' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+                >
+                    All
+                </a>
 
-                            <div class="small text-muted">
-                                Deadline: {{ t["deadline"] }}
+                <a
+                    href="{{ url_for('active') }}"
+                    class="btn btn-sm {% if active_page == 'active' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+                >
+                    Active
+                </a>
 
-                                {% if t["days_left"] is not none and t["status"] != "completed" %}
-                                    ·
-                                    {% if t["days_left"] < 0 %}
-                                        {{ (-t["days_left"]) }} day(s) late
-                                    {% elif t["days_left"] == 0 %}
-                                        due today
-                                    {% elif t["days_left"] == 1 %}
-                                        1 day left
-                                    {% else %}
-                                        {{ t["days_left"] }} days left
-                                    {% endif %}
-                                {% endif %}
-                            </div>
+                <a
+                    href="{{ url_for('done_view') }}"
+                    class="btn btn-sm {% if active_page == 'done' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+                >
+                    Completed
+                </a>
+            </div>
+        </div>
 
-                            <div class="mt-1">
-                                {% if t["is_overdue"] %}
-                                    <span class="badge text-bg-danger">Overdue</span>
-                                {% elif t["is_due_today"] %}
-                                    <span class="badge text-bg-warning">Due today</span>
-                                {% elif t["is_due_soon"] %}
-                                    <span class="badge text-bg-info">Due soon</span>
-                                {% endif %}
-
-                                {% if t["risk"] and t["status"] != "completed" %}
-                                    {% if t["risk"]["late_risk"] == "high" or t["risk"]["overtime_risk"] == "high" %}
-                                        <span class="badge text-bg-danger">High risk</span>
-                                    {% elif t["risk"]["late_risk"] == "medium" or t["risk"]["overtime_risk"] == "medium" %}
-                                        <span class="badge text-bg-warning">Medium risk</span>
-                                    {% else %}
-                                        <span class="badge text-bg-success">Low risk</span>
-                                    {% endif %}
-                                {% endif %}
-                            </div>
-
-                            <div class="small text-muted mt-1">
-                                Added: {{ t["created_at_display"] or "—" }}
+        {% if tasks %}
+            <div class="d-flex flex-column gap-3">
+                {% for t in tasks %}
+                <div class="task-block {% if t['status'] == 'completed' %}opacity-75{% endif %}">
+                    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                        <div class="flex-grow-1">
+                            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                <h4 class="h6 mb-0">
+                                    {{ t["title"] }}
+                                </h4>
 
                                 {% if t["status"] == "completed" %}
-                                    · Completed: {{ t["completed_at_display"] or "—" }}
-                                {% endif %}
-                            </div>
-                        </td>
-
-                        <td>
-                            <span class="badge text-bg-{{ t['priority_badge'] }}">
-                                {{ t["priority_label"] }}
-                            </span>
-                        </td>
-
-                        <td>{{ t["duration"] }} min</td>
-
-                        <td>
-                            {% if t["status"] == "completed" and t["actual_duration"] %}
-                                {{ t["actual_duration"] }} min
-                            {% else %}
-                                —
-                            {% endif %}
-                        </td>
-
-                        <td>
-                            {% if t["status"] == "completed" and t["actual_duration"] %}
-                                {% set delta = t["actual_duration"] - t["duration"] %}
-
-                                {% if delta > 0 %}
-                                    +{{ delta }}
-                                {% elif delta < 0 %}
-                                    {{ delta }}
+                                    <span class="badge text-bg-success">Completed</span>
                                 {% else %}
-                                    0
-                                {% endif %}
-                            {% else %}
-                                —
-                            {% endif %}
-                        </td>
-
-                        <td>
-                            {% if t["status"] == "completed" %}
-                                <span class="badge text-bg-success">Completed</span>
-                            {% else %}
-                                <span class="badge text-bg-secondary">Active</span>
-                            {% endif %}
-                        </td>
-
-                        <td class="text-end">
-                            <div class="d-flex justify-content-end gap-2">
-                                {% if t["status"] != "completed" %}
-                                    <a
-                                        class="btn btn-sm btn-outline-success"
-                                        href="{{ url_for('complete_form', task_id=t['id']) }}"
-                                    >
-                                        Complete
-                                    </a>
+                                    <span class="badge text-bg-secondary">Pending</span>
                                 {% endif %}
 
-                                <form method="POST" action="{{ url_for('delete', task_id=t['id']) }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">
-                                        Delete
-                                    </button>
-                                </form>
+                                <span class="badge text-bg-{{ t['priority_badge'] }}">
+                                    {{ t["priority_label"] }}
+                                </span>
+
+                                {% if t["recurrence_label"] %}
+                                    <span class="badge text-bg-info">
+                                        {{ t["recurrence_label"] }}
+                                    </span>
+                                {% endif %}
+
+                                {% if t["status"] != "completed" and t["is_overdue"] %}
+                                    <span class="badge text-bg-danger">Overdue</span>
+                                {% elif t["status"] != "completed" and t["is_due_today"] %}
+                                    <span class="badge text-bg-warning">Due Today</span>
+                                {% elif t["status"] != "completed" and t["is_due_soon"] %}
+                                    <span class="badge text-bg-primary">Due Soon</span>
+                                {% endif %}
                             </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+
+                            <div class="small text-muted d-flex flex-wrap gap-3">
+                                <span>Deadline: {{ t["deadline"] }}</span>
+                                <span>Planned: {{ t["duration"] }} min</span>
+
+                                {% if t["actual_duration"] %}
+                                    <span>Actual: {{ t["actual_duration"] }} min</span>
+                                {% endif %}
+
+                                {% if t["days_left"] is not none and t["status"] != "completed" %}
+                                    {% if t["days_left"] < 0 %}
+                                        <span>{{ -t["days_left"] }} day{% if -t["days_left"] != 1 %}s{% endif %} late</span>
+                                    {% elif t["days_left"] == 0 %}
+                                        <span>Due today</span>
+                                    {% else %}
+                                        <span>{{ t["days_left"] }} day{% if t["days_left"] != 1 %}s{% endif %} left</span>
+                                    {% endif %}
+                                {% endif %}
+
+                                {% if t["completed_at_display"] %}
+                                    <span>Completed: {{ t["completed_at_display"] }}</span>
+                                {% endif %}
+                            </div>
+
+                            {% if t["status"] != "completed" and t["risk"] %}
+                                <div class="d-flex flex-wrap gap-2 mt-3">
+                                    <span class="badge text-bg-secondary">
+                                        Time risk: {{ t["risk"]["overtime_risk"] }}
+                                    </span>
+
+                                    <span class="badge text-bg-secondary">
+                                        Deadline risk: {{ t["risk"]["late_risk"] }}
+                                    </span>
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="d-flex flex-wrap gap-2">
+                            {% if t["status"] != "completed" %}
+                                <a
+                                    href="{{ url_for('complete_form', task_id=t['id']) }}"
+                                    class="btn btn-sm btn-primary"
+                                >
+                                    Complete
+                                </a>
+                            {% endif %}
+
+                            <form
+                                method="POST"
+                                action="{{ url_for('delete', task_id=t['id']) }}"
+                                onsubmit="return confirm('Delete this task?');"
+                            >
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    Delete
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="task-block text-center py-5">
+                <h4 class="h6 mb-2">No tasks found</h4>
+                <p class="text-muted mb-0">
+                    {% if active_page in ["all", "active"] %}
+                        Add your first task using the form above.
+                    {% else %}
+                        There are no tasks in this view.
+                    {% endif %}
+                </p>
+            </div>
+        {% endif %}
     </div>
 </div>
-{% else %}
-<div class="card border-0 shadow-sm">
-    <div class="card-body p-5 text-center">
-        <h3 class="h5">No tasks yet</h3>
-        <p class="text-muted mb-0">
-            Add your first task to start building your daily workflow.
-        </p>
-    </div>
-</div>
-{% endif %}
+
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
-const priorityEl = document.getElementById("priorityInput");
-const deadlineEl = document.getElementById("deadlineInput");
-const durationEl = document.getElementById("durationInput");
-const recTextEl = document.getElementById("recText");
-const riskTextEl = document.getElementById("riskText");
-const useBtn = document.getElementById("useRecommendationBtn");
+const priorityInput = document.getElementById("priorityInput");
+const deadlineInput = document.getElementById("deadlineInput");
+const durationInput = document.getElementById("durationInput");
 const usedRecommendationInput = document.getElementById("usedRecommendationInput");
+const assistantBox = document.getElementById("assistantBox");
+const assistantMessage = document.getElementById("assistantMessage");
+const assistantDetails = document.getElementById("assistantDetails");
+const recommendedMinutes = document.getElementById("recommendedMinutes");
+const confidenceText = document.getElementById("confidenceText");
+const timeRiskBadge = document.getElementById("timeRiskBadge");
+const deadlineRiskBadge = document.getElementById("deadlineRiskBadge");
+const assistantSuggestion = document.getElementById("assistantSuggestion");
+const useRecommendedBtn = document.getElementById("useRecommendedBtn");
+const resetFormBtn = document.getElementById("resetFormBtn");
+const repeatTypeInput = document.getElementById("repeatTypeInput");
+const repeatIntervalInput = document.getElementById("repeatIntervalInput");
+const repeatIntervalHelp = document.getElementById("repeatIntervalHelp");
 
-let lastRecommended = null;
+let latestRecommendation = null;
+let recommendationTimer = null;
 
-function escapeHtml(value) {
-    const div = document.createElement("div");
-    div.textContent = value ?? "";
-    return div.innerHTML;
+function resetRecommendationState(message = "Enter priority, deadline, and planned duration to get a recommendation.") {
+    latestRecommendation = null;
+
+    if (assistantMessage) {
+        assistantMessage.textContent = message;
+    }
+
+    if (assistantDetails) {
+        assistantDetails.classList.add("d-none");
+    }
+
+    if (recommendedMinutes) {
+        recommendedMinutes.textContent = "0";
+    }
+
+    if (confidenceText) {
+        confidenceText.textContent = "-";
+    }
+
+    if (timeRiskBadge) {
+        timeRiskBadge.textContent = "-";
+        timeRiskBadge.className = "badge text-bg-secondary";
+    }
+
+    if (deadlineRiskBadge) {
+        deadlineRiskBadge.textContent = "-";
+        deadlineRiskBadge.className = "badge text-bg-secondary";
+    }
+
+    if (assistantSuggestion) {
+        assistantSuggestion.textContent = "";
+    }
+
+    if (useRecommendedBtn) {
+        useRecommendedBtn.disabled = true;
+    }
 }
 
-function smartRiskBadge(level) {
-    if (level === "high") {
-        return `<span class="badge text-bg-danger ms-2">High</span>`;
+function riskBadgeClass(level) {
+    const normalized = String(level || "").toLowerCase();
+
+    if (normalized === "high") {
+        return "badge text-bg-danger";
     }
 
-    if (level === "medium") {
-        return `<span class="badge text-bg-warning ms-2">Medium</span>`;
+    if (normalized === "medium") {
+        return "badge text-bg-warning";
     }
 
-    return `<span class="badge text-bg-success ms-2">Low</span>`;
+    if (normalized === "low") {
+        return "badge text-bg-success";
+    }
+
+    return "badge text-bg-secondary";
 }
 
 async function refreshRecommendation() {
-    useBtn.textContent = "Use recommended";
-    useBtn.disabled = true;
-    riskTextEl.textContent = "";
-
-    const pr = priorityEl?.value;
-    const dl = deadlineEl?.value;
-    const pl = durationEl?.value;
-
-    if (!pr || !dl || !pl || Number(pl) <= 0) {
-        recTextEl.textContent =
-            "Smart Assistant: enter priority, deadline and duration to get a suggestion.";
-
-        lastRecommended = null;
-
-        if (usedRecommendationInput) {
-            usedRecommendationInput.value = "0";
-        }
-
+    if (!priorityInput || !deadlineInput || !durationInput) {
         return;
     }
 
+    const priority = priorityInput.value;
+    const deadline = deadlineInput.value;
+    const planned = Number(durationInput.value || 0);
+
+    if (!priority || !deadline || planned <= 0) {
+        resetRecommendationState();
+        return;
+    }
+
+    if (assistantMessage) {
+        assistantMessage.textContent = "Checking task estimate and risk...";
+    }
+
     try {
-        const url = `/api/recommend?priority=${encodeURIComponent(pr)}&planned=${encodeURIComponent(pl)}&deadline=${encodeURIComponent(dl)}`;
-        const res = await fetch(url);
-        const data = await res.json();
+        const params = new URLSearchParams({
+            priority,
+            deadline,
+            planned: String(planned),
+        });
 
-        if (!data.ok) {
-            recTextEl.textContent = "Smart Assistant is unavailable for this task.";
-            riskTextEl.textContent = "";
-            lastRecommended = null;
+        const response = await fetch(`/api/recommend?${params.toString()}`);
+        const data = await response.json();
 
-            if (usedRecommendationInput) {
-                usedRecommendationInput.value = "0";
-            }
-
+        if (!response.ok || !data.ok) {
+            resetRecommendationState("Smart Assistant could not generate a recommendation for this input.");
             return;
         }
 
-        lastRecommended = data.recommended;
-        useBtn.disabled = false;
-        useBtn.textContent = "Use recommended";
+        latestRecommendation = data;
 
-        const assistant = data.assistant || {};
-        const bullets = (assistant.bullets || [])
-            .map(item => `<li>${escapeHtml(item)}</li>`)
-            .join("");
+        if (assistantDetails) {
+            assistantDetails.classList.remove("d-none");
+        }
 
-        recTextEl.innerHTML = `
-            <div class="fw-semibold mb-1">Smart Assistant</div>
-            <div>
-                I suggest planning around
-                <strong>${escapeHtml(data.recommended)} minutes</strong>
-                for this task.
-            </div>
-            <div class="small text-muted mt-1">
-                ${escapeHtml(assistant.confidence_message || "This estimate will improve as you complete more tasks.")}
-            </div>
-        `;
+        if (recommendedMinutes) {
+            recommendedMinutes.textContent = data.recommended;
+        }
 
-        riskTextEl.innerHTML = `
-            <div class="mt-2">
-                <div class="fw-semibold mb-1">
-                    ${escapeHtml(assistant.title || "Task overview")}
-                    ${smartRiskBadge(data.risk_level || "low")}
-                </div>
+        if (confidenceText) {
+            confidenceText.textContent = data.assistant?.confidence_text || data.confidence || "-";
+        }
 
-                <div class="small mb-2">
-                    ${escapeHtml(assistant.message || "")}
-                </div>
+        if (timeRiskBadge) {
+            timeRiskBadge.textContent = data.time_risk || "-";
+            timeRiskBadge.className = riskBadgeClass(data.time_risk);
+        }
 
-                ${bullets ? `<ul class="mb-2">${bullets}</ul>` : ""}
+        if (deadlineRiskBadge) {
+            deadlineRiskBadge.textContent = data.deadline_risk || "-";
+            deadlineRiskBadge.className = riskBadgeClass(data.deadline_risk);
+        }
 
-                <div class="small">
-                    <strong>Suggestion:</strong>
-                    ${escapeHtml(assistant.suggestion || "Your current plan looks reasonable.")}
-                </div>
-            </div>
-        `;
+        if (assistantMessage) {
+            assistantMessage.textContent =
+                data.assistant?.summary ||
+                "Smart Assistant generated a recommendation.";
+        }
 
-    } catch (e) {
-        recTextEl.textContent = "Smart Assistant is unavailable right now.";
-        riskTextEl.textContent = "";
-        lastRecommended = null;
+        if (assistantSuggestion) {
+            assistantSuggestion.textContent =
+                data.assistant?.suggestion ||
+                "Use the recommendation if it better matches the expected workload.";
+        }
 
-        if (usedRecommendationInput) {
-            usedRecommendationInput.value = "0";
+        if (useRecommendedBtn) {
+            useRecommendedBtn.disabled = false;
+        }
+
+    } catch (error) {
+        resetRecommendationState("Smart Assistant is temporarily unavailable.");
+    }
+}
+
+function scheduleRecommendationRefresh() {
+    if (usedRecommendationInput) {
+        usedRecommendationInput.value = "0";
+    }
+
+    if (recommendationTimer) {
+        clearTimeout(recommendationTimer);
+    }
+
+    recommendationTimer = setTimeout(refreshRecommendation, 350);
+}
+
+function updateRepeatIntervalState() {
+    if (!repeatTypeInput || !repeatIntervalInput || !repeatIntervalHelp) {
+        return;
+    }
+
+    const repeatType = repeatTypeInput.value;
+
+    if (repeatType === "none") {
+        repeatIntervalInput.disabled = true;
+        repeatIntervalInput.value = "1";
+        repeatIntervalHelp.textContent = "Repeat interval is disabled because this task does not repeat.";
+    } else {
+        repeatIntervalInput.disabled = false;
+
+        if (!repeatIntervalInput.value || Number(repeatIntervalInput.value) < 1) {
+            repeatIntervalInput.value = "1";
+        }
+
+        if (repeatType === "daily") {
+            repeatIntervalHelp.textContent = "Example: 1 = every day, 2 = every 2 days.";
+        } else if (repeatType === "weekly") {
+            repeatIntervalHelp.textContent = "Example: 1 = every week, 2 = every 2 weeks.";
+        } else if (repeatType === "monthly") {
+            repeatIntervalHelp.textContent = "Example: 1 = every month, 2 = every 2 months.";
         }
     }
 }
 
-priorityEl?.addEventListener("change", refreshRecommendation);
-deadlineEl?.addEventListener("change", refreshRecommendation);
-durationEl?.addEventListener("input", refreshRecommendation);
+priorityInput?.addEventListener("change", scheduleRecommendationRefresh);
+deadlineInput?.addEventListener("change", scheduleRecommendationRefresh);
+durationInput?.addEventListener("input", scheduleRecommendationRefresh);
 
-useBtn?.addEventListener("click", () => {
-    if (!lastRecommended) {
+useRecommendedBtn?.addEventListener("click", () => {
+    if (!latestRecommendation || !durationInput || !usedRecommendationInput) {
         return;
     }
 
-    durationEl.value = lastRecommended;
+    durationInput.value = latestRecommendation.recommended;
     usedRecommendationInput.value = "1";
 
-    recTextEl.innerHTML = `
-        <div class="fw-semibold mb-1">Smart Assistant</div>
-        <div>
-            Recommended time applied:
-            <strong>${lastRecommended} minutes</strong>.
-        </div>
-    `;
-
-    riskTextEl.textContent = "";
-    useBtn.textContent = "Applied";
-    useBtn.disabled = true;
+    if (assistantMessage) {
+        assistantMessage.textContent = "Recommended duration applied to this task.";
+    }
 });
+
+resetFormBtn?.addEventListener("click", () => {
+    setTimeout(() => {
+        if (usedRecommendationInput) {
+            usedRecommendationInput.value = "0";
+        }
+
+        updateRepeatIntervalState();
+        resetRecommendationState();
+    }, 0);
+});
+
+repeatTypeInput?.addEventListener("change", updateRepeatIntervalState);
+
+updateRepeatIntervalState();
+resetRecommendationState();
 </script>
 {% endblock %}

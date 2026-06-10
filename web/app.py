@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
+from core.ai_bootstrap import bootstrap_ai_training_data
 from core.ai_engine import get_ai_task_advice
 from core.auto_scheduler import generate_daily_plan
 from core.database import init_db
@@ -11,6 +12,11 @@ from core.priority import (
     priority_label,
     priority_options,
     priority_short_label,
+)
+from core.recurring import (
+    normalize_repeat_interval,
+    normalize_repeat_type,
+    recurrence_label,
 )
 from core.risk import assess_risk
 from core.scheduler import suggest_order
@@ -26,9 +32,9 @@ from core.task_manager import (
 )
 from core.workload import analyze_workload
 
-from core.ai_bootstrap import bootstrap_ai_training_data
 
 app = Flask(__name__)
+
 init_db()
 bootstrap_ai_training_data()
 
@@ -157,6 +163,14 @@ def _decorate_tasks(tasks):
         task_dict["priority_short_label"] = priority_short_label(task_priority)
         task_dict["priority_badge"] = priority_badge(task_priority)
 
+        repeat_type = normalize_repeat_type(task_dict.get("repeat_type", "none"))
+        repeat_interval = normalize_repeat_interval(task_dict.get("repeat_interval", 1))
+
+        task_dict["repeat_type"] = repeat_type
+        task_dict["repeat_interval"] = repeat_interval
+        task_dict["recurrence_label"] = recurrence_label(repeat_type, repeat_interval)
+        task_dict["is_recurring"] = repeat_type != "none"
+
         deadline_date = _safe_parse_task_date(task_dict.get("deadline", ""))
         status = task_dict.get("status", "pending")
 
@@ -243,11 +257,15 @@ def add():
     deadline = request.form.get("deadline", "").strip()
     duration = request.form.get("duration", "0").strip()
     used_recommendation = request.form.get("used_recommendation", "0").strip()
+    repeat_type = request.form.get("repeat_type", "none").strip()
+    repeat_interval = request.form.get("repeat_interval", "1").strip()
 
     try:
         priority = normalize_priority(priority)
         duration = int(duration)
         used_recommendation = int(used_recommendation)
+        repeat_type = normalize_repeat_type(repeat_type)
+        repeat_interval = normalize_repeat_interval(repeat_interval)
     except ValueError:
         return redirect(url_for("home"))
 
@@ -260,6 +278,8 @@ def add():
         deadline,
         duration,
         used_recommendation=used_recommendation,
+        repeat_type=repeat_type,
+        repeat_interval=repeat_interval,
     )
 
     return redirect(url_for("home"))
@@ -329,12 +349,13 @@ def api_complete(task_id):
                 "error": "Actual duration must be greater than 0.",
             }), 400
 
-        mark_completed(task_id, actual_duration)
+        result = mark_completed(task_id, actual_duration) or {}
 
         return jsonify({
             "ok": True,
             "task_id": task_id,
             "actual_duration": actual_duration,
+            "next_task_id": result.get("next_task_id"),
             "workload": _current_workload_payload(),
         })
 

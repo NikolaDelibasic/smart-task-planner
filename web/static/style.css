@@ -819,3 +819,37 @@ input[type="date"] {
 .timeline-priority-5 {
     border-left: 4px solid rgba(100, 116, 139, 0.75);
 }
+
+/* =========================
+   FORM DARK THEME FIXES
+========================= */
+
+.input-group-text {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--muted) !important;
+    border-radius: 12px;
+}
+
+.input-group .form-control {
+    border-right: 0;
+}
+
+.input-group .input-group-text {
+    border-left: 0 !important;
+}
+
+.form-control:disabled,
+.form-select:disabled,
+.form-control[readonly],
+.form-select[readonly] {
+    background: rgba(255, 255, 255, 0.025) !important;
+    border-color: var(--border) !important;
+    color: var(--muted) !important;
+    opacity: 1 !important;
+    cursor: not-allowed;
+}
+
+.form-control:disabled::placeholder {
+    color: rgba(149, 162, 191, 0.65) !important;
+}
