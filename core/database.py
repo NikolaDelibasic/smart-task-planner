@@ -1,7 +1,9 @@
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "planner.db"
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DB_PATH = BASE_DIR / "planner.db"
 
 
 def get_connection():
@@ -10,19 +12,44 @@ def get_connection():
     return conn
 
 
-def _column_exists(cursor, table_name: str, column_name: str) -> bool:
+def _column_exists(cursor, table_name, column_name):
     cursor.execute(f"PRAGMA table_info({table_name})")
-    return any(row["name"] == column_name for row in cursor.fetchall())
+    columns = cursor.fetchall()
+
+    return any(column["name"] == column_name for column in columns)
 
 
-def _add_column_if_missing(cursor, table_name: str, column_definition: str):
+def _add_column_if_missing(cursor, table_name, column_definition):
+    """
+    Adds a column only if it does not already exist.
+
+    Example:
+    _add_column_if_missing(cursor, "tasks", "created_at TEXT")
+    """
     column_name = column_definition.split()[0]
 
     if not _column_exists(cursor, table_name, column_name):
-        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_definition}")
+        cursor.execute(f"""
+            ALTER TABLE {table_name}
+            ADD COLUMN {column_definition}
+        """)
 
 
-def _get_setting(cursor, key: str):
+def _table_exists(cursor, table_name):
+    cursor.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = ?
+        """,
+        (table_name,),
+    )
+
+    return cursor.fetchone() is not None
+
+
+def _get_setting(cursor, key):
     cursor.execute(
         """
         SELECT value
@@ -34,27 +61,222 @@ def _get_setting(cursor, key: str):
 
     row = cursor.fetchone()
 
-    if row is None:
+    if not row:
         return None
 
     return row["value"]
 
 
-def _set_setting(cursor, key: str, value: str):
+def _set_setting(cursor, key, value):
     cursor.execute(
         """
         INSERT INTO app_settings (key, value)
         VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET
-            value = excluded.value
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """,
-        (key, value),
+        (key, str(value)),
     )
+
+
+def _create_core_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 3,
+            deadline TEXT NOT NULL,
+            duration INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            actual_duration INTEGER,
+            completed_at TEXT,
+            used_recommendation INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS task_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_task_id INTEGER,
+            title TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 3,
+            planned_duration INTEGER NOT NULL,
+            actual_duration INTEGER NOT NULL,
+            deadline TEXT,
+            days_to_deadline INTEGER DEFAULT 0,
+            weekend_deadline INTEGER DEFAULT 0,
+            completed_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            is_seed INTEGER DEFAULT 0
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+
+
+def _create_model_status_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ml_model_status (
+            id INTEGER PRIMARY KEY,
+            model_name TEXT DEFAULT 'Ridge Regression',
+            trained INTEGER DEFAULT 0,
+            samples_used INTEGER DEFAULT 0,
+            mae REAL,
+            last_trained TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS risk_model_status (
+            id INTEGER PRIMARY KEY,
+            model_name TEXT DEFAULT 'Logistic Regression Risk Model',
+            trained INTEGER DEFAULT 0,
+            samples_used INTEGER DEFAULT 0,
+            overtime_accuracy REAL,
+            late_accuracy REAL,
+            last_trained TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+def _migrate_tasks_table(cursor):
+    _add_column_if_missing(cursor, "tasks", "actual_duration INTEGER")
+    _add_column_if_missing(cursor, "tasks", "completed_at TEXT")
+    _add_column_if_missing(cursor, "tasks", "used_recommendation INTEGER DEFAULT 0")
+    _add_column_if_missing(cursor, "tasks", "created_at TEXT")
+
+    cursor.execute("""
+        UPDATE tasks
+        SET created_at = CURRENT_TIMESTAMP
+        WHERE created_at IS NULL
+           OR created_at = ''
+    """)
+
+    cursor.execute("""
+        UPDATE tasks
+        SET status = 'pending'
+        WHERE status IS NULL
+           OR status = ''
+    """)
+
+    cursor.execute("""
+        UPDATE tasks
+        SET priority = 3
+        WHERE priority IS NULL
+    """)
+
+    cursor.execute("""
+        UPDATE tasks
+        SET used_recommendation = 0
+        WHERE used_recommendation IS NULL
+    """)
+
+
+def _migrate_task_history_table(cursor):
+    _add_column_if_missing(cursor, "task_history", "source_task_id INTEGER")
+    _add_column_if_missing(cursor, "task_history", "days_to_deadline INTEGER DEFAULT 0")
+    _add_column_if_missing(cursor, "task_history", "weekend_deadline INTEGER DEFAULT 0")
+    _add_column_if_missing(cursor, "task_history", "completed_at TEXT")
+    _add_column_if_missing(cursor, "task_history", "created_at TEXT")
+    _add_column_if_missing(cursor, "task_history", "is_seed INTEGER DEFAULT 0")
+
+    cursor.execute("""
+        UPDATE task_history
+        SET created_at = CURRENT_TIMESTAMP
+        WHERE created_at IS NULL
+           OR created_at = ''
+    """)
+
+    cursor.execute("""
+        UPDATE task_history
+        SET is_seed = 0
+        WHERE is_seed IS NULL
+    """)
+
+    cursor.execute("""
+        UPDATE task_history
+        SET days_to_deadline = 0
+        WHERE days_to_deadline IS NULL
+    """)
+
+    cursor.execute("""
+        UPDATE task_history
+        SET weekend_deadline = 0
+        WHERE weekend_deadline IS NULL
+    """)
+
+
+def _migrate_model_status_tables(cursor):
+    _add_column_if_missing(cursor, "ml_model_status", "model_name TEXT DEFAULT 'Ridge Regression'")
+    _add_column_if_missing(cursor, "ml_model_status", "trained INTEGER DEFAULT 0")
+    _add_column_if_missing(cursor, "ml_model_status", "samples_used INTEGER DEFAULT 0")
+    _add_column_if_missing(cursor, "ml_model_status", "mae REAL")
+    _add_column_if_missing(cursor, "ml_model_status", "last_trained TEXT")
+    _add_column_if_missing(cursor, "ml_model_status", "updated_at TEXT")
+
+    _add_column_if_missing(cursor, "risk_model_status", "model_name TEXT DEFAULT 'Logistic Regression Risk Model'")
+    _add_column_if_missing(cursor, "risk_model_status", "trained INTEGER DEFAULT 0")
+    _add_column_if_missing(cursor, "risk_model_status", "samples_used INTEGER DEFAULT 0")
+    _add_column_if_missing(cursor, "risk_model_status", "overtime_accuracy REAL")
+    _add_column_if_missing(cursor, "risk_model_status", "late_accuracy REAL")
+    _add_column_if_missing(cursor, "risk_model_status", "last_trained TEXT")
+    _add_column_if_missing(cursor, "risk_model_status", "updated_at TEXT")
+
+    cursor.execute("""
+        INSERT OR IGNORE INTO ml_model_status (
+            id,
+            model_name,
+            trained,
+            samples_used,
+            mae,
+            last_trained,
+            updated_at
+        )
+        VALUES (
+            1,
+            'Ridge Regression',
+            0,
+            0,
+            NULL,
+            NULL,
+            CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        INSERT OR IGNORE INTO risk_model_status (
+            id,
+            model_name,
+            trained,
+            samples_used,
+            overtime_accuracy,
+            late_accuracy,
+            last_trained,
+            updated_at
+        )
+        VALUES (
+            1,
+            'Logistic Regression Risk Model',
+            0,
+            0,
+            NULL,
+            NULL,
+            NULL,
+            CURRENT_TIMESTAMP
+        )
+    """)
 
 
 def _migrate_priority_scale(cursor):
     """
-    One-time migration from old 1-3 priority scale to new P1-P5 scale.
+    One-time migration from the old 1-3 priority scale to the new 1-5 scale.
 
     Old scale:
     1 = low
@@ -62,181 +284,95 @@ def _migrate_priority_scale(cursor):
     3 = high
 
     New scale:
-    1 = P1 Critical
-    2 = P2 High
-    3 = P3 Normal
-    4 = P4 Low
-    5 = P5 Optional
+    1 = critical
+    2 = high
+    3 = normal
+    4 = low
+    5 = optional
 
     Mapping:
-    old 3 high   -> new 2 high
-    old 2 medium -> new 3 normal
-    old 1 low    -> new 4 low
+    old 3 -> new 2
+    old 2 -> new 3
+    old 1 -> new 4
     """
-    migration_key = "priority_scale_v2_migrated"
 
-    if _get_setting(cursor, migration_key) == "1":
+    setting_key = "priority_scale_v2_migrated"
+
+    if _get_setting(cursor, setting_key) == "1":
         return
 
+    if _table_exists(cursor, "tasks"):
+        cursor.execute("""
+            UPDATE tasks
+            SET priority = CASE
+                WHEN priority = 1 THEN 4
+                WHEN priority = 2 THEN 3
+                WHEN priority = 3 THEN 2
+                ELSE priority
+            END
+            WHERE priority IN (1, 2, 3)
+        """)
+
+    if _table_exists(cursor, "task_history"):
+        cursor.execute("""
+            UPDATE task_history
+            SET priority = CASE
+                WHEN priority = 1 THEN 4
+                WHEN priority = 2 THEN 3
+                WHEN priority = 3 THEN 2
+                ELSE priority
+            END
+            WHERE priority IN (1, 2, 3)
+              AND COALESCE(is_seed, 0) = 0
+        """)
+
+    _set_setting(cursor, setting_key, "1")
+
+
+def _create_indexes(cursor):
     cursor.execute("""
-        UPDATE tasks
-        SET priority = CASE priority
-            WHEN 1 THEN 4
-            WHEN 2 THEN 3
-            WHEN 3 THEN 2
-            ELSE priority
-        END
-        WHERE priority IN (1, 2, 3)
+        CREATE INDEX IF NOT EXISTS idx_tasks_status
+        ON tasks(status)
     """)
 
     cursor.execute("""
-        UPDATE task_history
-        SET priority = CASE priority
-            WHEN 1 THEN 4
-            WHEN 2 THEN 3
-            WHEN 3 THEN 2
-            ELSE priority
-        END
-        WHERE priority IN (1, 2, 3)
+        CREATE INDEX IF NOT EXISTS idx_tasks_deadline
+        ON tasks(deadline)
     """)
 
-    _set_setting(cursor, migration_key, "1")
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_tasks_priority
+        ON tasks(priority)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_task_history_completed_at
+        ON task_history(completed_at)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_task_history_is_seed
+        ON task_history(is_seed)
+    """)
 
 
 def init_db():
-    with get_connection() as conn:
-        cursor = conn.cursor()
+    conn = get_connection()
+    cursor = conn.cursor()
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS app_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-        """)
+    try:
+        _create_core_tables(cursor)
+        _create_model_status_tables(cursor)
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS tasks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                priority INTEGER NOT NULL,
-                deadline TEXT NOT NULL,
-                duration INTEGER NOT NULL,
-                status TEXT DEFAULT 'pending',
-                actual_duration INTEGER,
-                completed_at TEXT,
-                used_recommendation INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        _add_column_if_missing(cursor, "tasks", "actual_duration INTEGER")
-        _add_column_if_missing(cursor, "tasks", "completed_at TEXT")
-        _add_column_if_missing(cursor, "tasks", "used_recommendation INTEGER DEFAULT 0")
-        _add_column_if_missing(cursor, "tasks", "created_at TEXT DEFAULT CURRENT_TIMESTAMP")
-
-        cursor.execute("""
-            UPDATE tasks
-            SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)
-            WHERE created_at IS NULL OR TRIM(created_at) = ''
-        """)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS task_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_task_id INTEGER,
-                title TEXT,
-                priority INTEGER,
-                planned_duration INTEGER,
-                actual_duration INTEGER,
-                deadline TEXT,
-                days_to_deadline INTEGER,
-                weekend_deadline INTEGER,
-                completed_at TEXT,
-                created_at TEXT
-            )
-        """)
-
-        _add_column_if_missing(cursor, "task_history", "source_task_id INTEGER")
-        _add_column_if_missing(cursor, "task_history", "days_to_deadline INTEGER")
-        _add_column_if_missing(cursor, "task_history", "weekend_deadline INTEGER")
-        _add_column_if_missing(cursor, "task_history", "completed_at TEXT")
-        _add_column_if_missing(cursor, "task_history", "created_at TEXT")
-
-        cursor.execute("""
-            UPDATE task_history
-            SET created_at = COALESCE(created_at, completed_at, CURRENT_TIMESTAMP)
-            WHERE created_at IS NULL OR TRIM(created_at) = ''
-        """)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS ml_model_status (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                model_name TEXT NOT NULL,
-                trained INTEGER NOT NULL DEFAULT 0,
-                samples INTEGER NOT NULL DEFAULT 0,
-                mae REAL,
-                updated_at TEXT,
-                message TEXT
-            )
-        """)
-
-        cursor.execute("""
-            INSERT OR IGNORE INTO ml_model_status (
-                id,
-                model_name,
-                trained,
-                samples,
-                mae,
-                updated_at,
-                message
-            )
-            VALUES (
-                1,
-                'Ridge Regression',
-                0,
-                0,
-                NULL,
-                NULL,
-                'Model is not trained yet.'
-            )
-        """)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS risk_model_status (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                model_name TEXT NOT NULL,
-                trained INTEGER NOT NULL DEFAULT 0,
-                samples INTEGER NOT NULL DEFAULT 0,
-                overtime_accuracy REAL,
-                late_accuracy REAL,
-                updated_at TEXT,
-                message TEXT
-            )
-        """)
-
-        cursor.execute("""
-            INSERT OR IGNORE INTO risk_model_status (
-                id,
-                model_name,
-                trained,
-                samples,
-                overtime_accuracy,
-                late_accuracy,
-                updated_at,
-                message
-            )
-            VALUES (
-                1,
-                'Logistic Regression Risk Model',
-                0,
-                0,
-                NULL,
-                NULL,
-                NULL,
-                'Risk model is not trained yet.'
-            )
-        """)
+        _migrate_tasks_table(cursor)
+        _migrate_task_history_table(cursor)
+        _migrate_model_status_tables(cursor)
 
         _migrate_priority_scale(cursor)
 
+        _create_indexes(cursor)
+
         conn.commit()
+
+    finally:
+        conn.close()

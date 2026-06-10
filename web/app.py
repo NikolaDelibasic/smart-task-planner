@@ -26,9 +26,11 @@ from core.task_manager import (
 )
 from core.workload import analyze_workload
 
+from core.ai_bootstrap import bootstrap_ai_training_data
 
 app = Flask(__name__)
 init_db()
+bootstrap_ai_training_data()
 
 MAX_PLANNER_BLOCKS = 10
 
