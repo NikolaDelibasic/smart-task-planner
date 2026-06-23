@@ -373,6 +373,101 @@ def api_workload():
         "workload": _current_workload_payload(),
     })
 
+@app.route("/api/notifications")
+def api_notifications():
+    try:
+        tasks = _decorate_tasks(get_active_tasks())
+        notifications = []
+
+        for task in tasks:
+            if task.get("status") == "completed":
+                continue
+
+            task_id = task.get("id")
+            title = task.get("title", "Task")
+            deadline = task.get("deadline", "")
+            days_left = task.get("days_left")
+            priority_label_text = task.get("priority_label", "Normal")
+            risk = task.get("risk") or {}
+
+            if task.get("is_overdue"):
+                days_late = abs(days_left or 0)
+
+                notifications.append({
+                    "id": f"overdue-{task_id}-{deadline}",
+                    "task_id": task_id,
+                    "type": "overdue",
+                    "urgency": "high",
+                    "title": "Overdue task",
+                    "message": f"{title} is overdue by {days_late} day{'s' if days_late != 1 else ''}.",
+                    "task_title": title,
+                    "deadline": deadline,
+                    "priority": priority_label_text,
+                })
+
+            elif task.get("is_due_today"):
+                notifications.append({
+                    "id": f"due-today-{task_id}-{deadline}",
+                    "task_id": task_id,
+                    "type": "due_today",
+                    "urgency": "medium",
+                    "title": "Task due today",
+                    "message": f"{title} is due today.",
+                    "task_title": title,
+                    "deadline": deadline,
+                    "priority": priority_label_text,
+                })
+
+            elif task.get("is_due_soon"):
+                notifications.append({
+                    "id": f"due-soon-{task_id}-{deadline}",
+                    "task_id": task_id,
+                    "type": "due_soon",
+                    "urgency": "low",
+                    "title": "Upcoming deadline",
+                    "message": f"{title} is due in {days_left} day{'s' if days_left != 1 else ''}.",
+                    "task_title": title,
+                    "deadline": deadline,
+                    "priority": priority_label_text,
+                })
+
+            if str(risk.get("overtime_risk", "")).lower() == "high":
+                notifications.append({
+                    "id": f"time-risk-{task_id}-{deadline}",
+                    "task_id": task_id,
+                    "type": "time_risk",
+                    "urgency": "medium",
+                    "title": "High time risk",
+                    "message": f"{title} has high time risk. Consider adding buffer or splitting the work.",
+                    "task_title": title,
+                    "deadline": deadline,
+                    "priority": priority_label_text,
+                })
+
+            if str(risk.get("late_risk", "")).lower() == "high":
+                notifications.append({
+                    "id": f"deadline-risk-{task_id}-{deadline}",
+                    "task_id": task_id,
+                    "type": "deadline_risk",
+                    "urgency": "high",
+                    "title": "High deadline risk",
+                    "message": f"{title} has high deadline risk. It may need attention soon.",
+                    "task_title": title,
+                    "deadline": deadline,
+                    "priority": priority_label_text,
+                })
+
+        return jsonify({
+            "ok": True,
+            "count": len(notifications),
+            "notifications": notifications,
+        })
+
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+        }), 500
 
 @app.route("/active")
 def active():

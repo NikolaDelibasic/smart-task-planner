@@ -50,6 +50,7 @@ Manage your tasks, deadlines, AI duration recommendations, priority levels, and 
 </div>
 {% endif %}
 
+
 {% if active_page in ["all", "active"] %}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body p-4">
@@ -383,7 +384,6 @@ const priorityInput = document.getElementById("priorityInput");
 const deadlineInput = document.getElementById("deadlineInput");
 const durationInput = document.getElementById("durationInput");
 const usedRecommendationInput = document.getElementById("usedRecommendationInput");
-const assistantBox = document.getElementById("assistantBox");
 const assistantMessage = document.getElementById("assistantMessage");
 const assistantDetails = document.getElementById("assistantDetails");
 const recommendedMinutes = document.getElementById("recommendedMinutes");
@@ -603,6 +603,624 @@ resetFormBtn?.addEventListener("click", () => {
 });
 
 repeatTypeInput?.addEventListener("change", updateRepeatIntervalState);
+
+/* =========================
+   SMART ALERTS
+========================= */
+
+const WARNING_NOTIFICATION_STORAGE_KEY = "smart_task_planner_warning_notifications";
+const ALERT_INBOX_STORAGE_KEY = "smart_task_planner_alert_inbox";
+const MOTIVATIONAL_ALERTS_STORAGE_KEY = "smart_task_planner_motivational_alerts_enabled";
+const LAST_MOTIVATION_STORAGE_KEY = "smart_task_planner_last_motivation_alert";
+const MAX_ALERT_INBOX_ITEMS = 30;
+const TASK_WARNING_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const MOTIVATION_FIRST_DELAY_MS = 90 * 1000;
+const MOTIVATION_INTERVAL_MS = 45 * 60 * 1000;
+const MOTIVATION_CHECK_INTERVAL_MS = 60 * 1000;
+
+let smartAlertAudioContext = null;
+
+function todayKey() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+}
+
+function getJsonFromStorage(key, fallback = {}) {
+    try {
+        return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+    } catch (error) {
+        return fallback;
+    }
+}
+
+function saveJsonToStorage(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
+}
+
+function getAlertInbox() {
+    const inbox = getJsonFromStorage(ALERT_INBOX_STORAGE_KEY, []);
+
+    if (!Array.isArray(inbox)) {
+        return [];
+    }
+
+    return inbox;
+}
+
+function saveAlertInbox(inbox) {
+    saveJsonToStorage(ALERT_INBOX_STORAGE_KEY, inbox.slice(0, MAX_ALERT_INBOX_ITEMS));
+}
+
+function deleteAlertFromInbox(alertId) {
+    const inbox = getAlertInbox().filter((item) => item.id !== alertId);
+    saveAlertInbox(inbox);
+    renderNotificationCenter();
+}
+
+function markSingleAlertAsRead(alertId) {
+    const center = document.getElementById("smartNotificationCenter");
+    const shouldStayOpen = center?.classList.contains("open");
+
+    const inbox = getAlertInbox().map((item) => {
+        if (item.id === alertId) {
+            return {
+                ...item,
+                read: true,
+            };
+        }
+
+        return item;
+    });
+
+    saveAlertInbox(inbox);
+    renderNotificationCenter();
+
+    if (shouldStayOpen) {
+        document.getElementById("smartNotificationCenter")?.classList.add("open");
+    }
+}
+
+function addAlertToInbox(title, message, type = "info") {
+    const inbox = getAlertInbox();
+
+    const alertItem = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        title,
+        message,
+        type,
+        createdAt: new Date().toISOString(),
+        read: false,
+    };
+
+    inbox.unshift(alertItem);
+    saveAlertInbox(inbox);
+    renderNotificationCenter();
+}
+
+function unreadAlertCount() {
+    return getAlertInbox().filter((item) => !item.read).length;
+}
+
+function formatAlertTime(value) {
+    try {
+        const dateValue = new Date(value);
+
+        return dateValue.toLocaleString([], {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    } catch (error) {
+        return "";
+    }
+}
+
+function motivationalAlertsEnabled() {
+    return localStorage.getItem(MOTIVATIONAL_ALERTS_STORAGE_KEY) !== "0";
+}
+
+function setMotivationalAlertsEnabled(enabled) {
+    localStorage.setItem(MOTIVATIONAL_ALERTS_STORAGE_KEY, enabled ? "1" : "0");
+}
+
+function ensureNotificationCenter() {
+    if (document.getElementById("smartNotificationCenter")) {
+        return;
+    }
+
+    const center = document.createElement("div");
+    center.id = "smartNotificationCenter";
+    center.className = "smart-notification-center";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "smartNotificationButton";
+    button.className = "smart-notification-button";
+    button.setAttribute("aria-label", "Open notifications");
+    button.innerHTML = `
+        <span class="smart-notification-icon">✉</span>
+        <span class="smart-notification-badge d-none" id="smartNotificationBadge">0</span>
+    `;
+
+    const panel = document.createElement("div");
+    panel.id = "smartNotificationPanel";
+    panel.className = "smart-notification-panel";
+
+    panel.innerHTML = `
+        <div class="smart-notification-panel-header">
+            <div>
+                <div class="small text-muted">Smart Alerts</div>
+                <strong>Notifications</strong>
+            </div>
+
+            <button type="button" class="smart-toast-close" id="closeNotificationPanelBtn" aria-label="Close notifications">
+                ×
+            </button>
+        </div>
+
+        <div class="smart-notification-panel-settings">
+            <div class="form-check form-switch mb-1">
+                <input class="form-check-input" type="checkbox" role="switch" id="motivationalAlertsToggle">
+                <label class="form-check-label" for="motivationalAlertsToggle">
+                    Motivational alerts
+                </label>
+            </div>
+
+            <div class="small text-muted">
+                Optional encouragement messages while the app is open.
+            </div>
+        </div>
+
+        <div class="smart-notification-panel-actions">
+            <button type="button" class="btn btn-sm btn-outline-primary" id="markAlertsReadBtn">
+                Mark read
+            </button>
+
+            <button type="button" class="btn btn-sm btn-outline-danger" id="clearAlertsBtn">
+                Clear
+            </button>
+        </div>
+
+        <div class="smart-notification-list" id="smartNotificationList"></div>
+    `;
+
+    center.appendChild(button);
+    center.appendChild(panel);
+    document.body.appendChild(center);
+
+    const motivationToggle = panel.querySelector("#motivationalAlertsToggle");
+
+    if (motivationToggle) {
+        motivationToggle.checked = motivationalAlertsEnabled();
+
+        motivationToggle.addEventListener("change", () => {
+            const enabled = motivationToggle.checked;
+            setMotivationalAlertsEnabled(enabled);
+
+            if (enabled) {
+                showInAppAlert(
+                    "Motivational alerts enabled",
+                    "You will receive occasional encouragement while the app is open.",
+                    "success",
+                    {
+                        saveToInbox: false,
+                    }
+                );
+
+                maybeShowMotivationalAlert(true);
+            } else {
+                showInAppAlert(
+                    "Motivational alerts disabled",
+                    "Deadline and risk alerts will continue to work automatically.",
+                    "info",
+                    {
+                        saveToInbox: false,
+                    }
+                );
+            }
+        });
+    }
+
+    button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        center.classList.toggle("open");
+        renderNotificationCenter();
+    });
+
+    panel.querySelector("#closeNotificationPanelBtn")?.addEventListener("click", () => {
+        center.classList.remove("open");
+    });
+
+    panel.addEventListener("click", (event) => {
+        event.stopPropagation();
+    });
+
+    panel.querySelector("#markAlertsReadBtn")?.addEventListener("click", () => {
+        const inbox = getAlertInbox().map((item) => ({
+            ...item,
+            read: true,
+        }));
+
+        saveAlertInbox(inbox);
+        renderNotificationCenter();
+    });
+
+    panel.querySelector("#clearAlertsBtn")?.addEventListener("click", () => {
+        saveAlertInbox([]);
+        renderNotificationCenter();
+    });
+
+    document.addEventListener("click", (event) => {
+        if (!center.contains(event.target)) {
+            center.classList.remove("open");
+        }
+    });
+}
+
+function renderNotificationCenter() {
+    ensureNotificationCenter();
+
+    const badge = document.getElementById("smartNotificationBadge");
+    const list = document.getElementById("smartNotificationList");
+    const motivationToggle = document.getElementById("motivationalAlertsToggle");
+    const inbox = getAlertInbox();
+    const unreadCount = unreadAlertCount();
+
+    if (motivationToggle) {
+        motivationToggle.checked = motivationalAlertsEnabled();
+    }
+
+    if (badge) {
+        badge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+        badge.classList.toggle("d-none", unreadCount === 0);
+    }
+
+    if (!list) {
+        return;
+    }
+
+    list.innerHTML = "";
+
+    if (!inbox.length) {
+        const empty = document.createElement("div");
+        empty.className = "smart-notification-empty";
+        empty.textContent = "No notifications yet.";
+        list.appendChild(empty);
+        return;
+    }
+
+    inbox.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = `smart-notification-item smart-notification-item-${item.type || "info"}`;
+
+        if (!item.read) {
+            row.classList.add("unread");
+        }
+
+        row.addEventListener("click", (event) => {
+            event.stopPropagation();
+
+            if (!item.read) {
+                markSingleAlertAsRead(item.id);
+            }
+        });
+
+        const top = document.createElement("div");
+        top.className = "smart-notification-item-top";
+
+        const title = document.createElement("strong");
+        title.textContent = item.title || "Notification";
+
+        const time = document.createElement("span");
+        time.className = "smart-notification-time";
+        time.textContent = formatAlertTime(item.createdAt);
+
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "smart-notification-delete";
+        deleteButton.textContent = "×";
+        deleteButton.setAttribute("aria-label", "Delete notification");
+
+        deleteButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            deleteAlertFromInbox(item.id);
+        });
+
+        const meta = document.createElement("div");
+        meta.className = "smart-notification-item-meta";
+
+        const message = document.createElement("div");
+        message.className = "smart-notification-item-message";
+        message.textContent = item.message || "";
+
+        top.appendChild(title);
+        meta.appendChild(time);
+        meta.appendChild(deleteButton);
+        top.appendChild(meta);
+
+        row.appendChild(top);
+        row.appendChild(message);
+
+        list.appendChild(row);
+    });
+}
+
+function ensureToastContainer() {
+    let container = document.getElementById("smartToastContainer");
+
+    if (!container) {
+        container = document.createElement("div");
+        container.id = "smartToastContainer";
+        container.className = "smart-toast-container";
+        document.body.appendChild(container);
+    }
+
+    return container;
+}
+
+function unlockAlertSound() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextClass) {
+        return;
+    }
+
+    if (!smartAlertAudioContext) {
+        smartAlertAudioContext = new AudioContextClass();
+    }
+
+    if (smartAlertAudioContext.state === "suspended") {
+        smartAlertAudioContext.resume();
+    }
+}
+
+function playAlertSound(type = "info") {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextClass) {
+        return;
+    }
+
+    try {
+        if (!smartAlertAudioContext) {
+            smartAlertAudioContext = new AudioContextClass();
+        }
+
+        const ctx = smartAlertAudioContext;
+
+        if (ctx.state === "suspended") {
+            ctx.resume();
+        }
+
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        const frequencyMap = {
+            danger: 420,
+            warning: 520,
+            info: 660,
+            success: 760,
+            focus: 620,
+        };
+
+        oscillator.type = "sine";
+        oscillator.frequency.value = frequencyMap[type] || frequencyMap.info;
+
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+
+        oscillator.start(ctx.currentTime);
+        oscillator.stop(ctx.currentTime + 0.38);
+    } catch (error) {
+        console.warn("Alert sound could not be played.", error);
+    }
+}
+
+function alertTypeFromUrgency(urgency) {
+    const normalized = String(urgency || "").toLowerCase();
+
+    if (normalized === "high") {
+        return "danger";
+    }
+
+    if (normalized === "medium") {
+        return "warning";
+    }
+
+    if (normalized === "low") {
+        return "info";
+    }
+
+    return "info";
+}
+
+function showInAppAlert(title, message, type = "info", options = {}) {
+    const container = ensureToastContainer();
+
+    const toast = document.createElement("div");
+    toast.className = `smart-toast smart-toast-${type}`;
+
+    const header = document.createElement("div");
+    header.className = "smart-toast-header";
+
+    const titleElement = document.createElement("strong");
+    titleElement.textContent = title;
+
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "smart-toast-close";
+    closeButton.textContent = "×";
+    closeButton.setAttribute("aria-label", "Close alert");
+
+    const messageElement = document.createElement("div");
+    messageElement.className = "smart-toast-message";
+    messageElement.textContent = message;
+
+    header.appendChild(titleElement);
+    header.appendChild(closeButton);
+    toast.appendChild(header);
+    toast.appendChild(messageElement);
+
+    container.appendChild(toast);
+
+    if (options.saveToInbox !== false) {
+        addAlertToInbox(title, message, type);
+    }
+
+    playAlertSound(type);
+
+    const timeout = options.timeout || (type === "danger" ? 12000 : 8000);
+
+    const removeToast = () => {
+        toast.classList.add("smart-toast-hide");
+
+        setTimeout(() => {
+            toast.remove();
+        }, 250);
+    };
+
+    closeButton.addEventListener("click", removeToast);
+    setTimeout(removeToast, timeout);
+}
+
+function wasWarningShownToday(notificationId) {
+    const stored = getJsonFromStorage(WARNING_NOTIFICATION_STORAGE_KEY, {});
+    return stored[notificationId] === todayKey();
+}
+
+function markWarningShown(notificationId) {
+    const stored = getJsonFromStorage(WARNING_NOTIFICATION_STORAGE_KEY, {});
+    stored[notificationId] = todayKey();
+    saveJsonToStorage(WARNING_NOTIFICATION_STORAGE_KEY, stored);
+}
+
+async function checkTaskWarnings(forceShow = false) {
+    try {
+        const response = await fetch("/api/notifications");
+        const data = await response.json();
+
+        if (!response.ok || !data.ok) {
+            return;
+        }
+
+        for (const notification of data.notifications || []) {
+            if (!forceShow && wasWarningShownToday(notification.id)) {
+                continue;
+            }
+
+            const type = alertTypeFromUrgency(notification.urgency);
+
+            showInAppAlert(
+                notification.title,
+                notification.message,
+                type,
+                {
+                    timeout: type === "danger" ? 12000 : 8000,
+                }
+            );
+
+            markWarningShown(notification.id);
+        }
+    } catch (error) {
+        console.warn("Smart alerts are temporarily unavailable.", error);
+    }
+}
+
+function motivationalMessages() {
+    return [
+        {
+            title: "Small progress counts",
+            message: "Pick one active task and move it forward for a few minutes.",
+        },
+        {
+            title: "Stay organized",
+            message: "Review your next deadline and decide what should be finished first.",
+        },
+        {
+            title: "Good planning reduces stress",
+            message: "If a task feels too large, split it into a smaller next step.",
+        },
+        {
+            title: "Keep momentum",
+            message: "A short focused session is better than waiting for perfect conditions.",
+        },
+        {
+            title: "Check your priorities",
+            message: "High-priority tasks deserve attention before optional work.",
+        },
+    ];
+}
+
+function motivationAlertDue(forceShow = false) {
+    if (!motivationalAlertsEnabled()) {
+        return false;
+    }
+
+    if (forceShow) {
+        return true;
+    }
+
+    const lastShown = Number(localStorage.getItem(LAST_MOTIVATION_STORAGE_KEY) || "0");
+
+    return Date.now() - lastShown >= MOTIVATION_INTERVAL_MS;
+}
+
+function maybeShowMotivationalAlert(forceShow = false) {
+    if (!motivationAlertDue(forceShow)) {
+        return;
+    }
+
+    const messages = motivationalMessages();
+    const index = Math.floor(Date.now() / MOTIVATION_INTERVAL_MS) % messages.length;
+    const selected = messages[index];
+
+    showInAppAlert(
+        selected.title,
+        selected.message,
+        "focus",
+        {
+            timeout: 8000,
+        }
+    );
+
+    localStorage.setItem(LAST_MOTIVATION_STORAGE_KEY, String(Date.now()));
+}
+
+/* =========================
+   INITIALIZATION
+========================= */
+
+ensureNotificationCenter();
+renderNotificationCenter();
+
+document.addEventListener("click", () => {
+    unlockAlertSound();
+}, {
+    once: true,
+});
+
+checkTaskWarnings(false);
+
+setTimeout(() => {
+    maybeShowMotivationalAlert(false);
+}, MOTIVATION_FIRST_DELAY_MS);
+
+setInterval(() => {
+    checkTaskWarnings(false);
+}, TASK_WARNING_CHECK_INTERVAL_MS);
+
+setInterval(() => {
+    maybeShowMotivationalAlert(false);
+}, MOTIVATION_CHECK_INTERVAL_MS);
 
 updateRepeatIntervalState();
 resetRecommendationState();
