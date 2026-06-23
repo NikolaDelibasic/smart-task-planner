@@ -17,3 +17,11 @@ core/models/
 
 # macOS
 .DS_Store
+
+*.db
+*.sqlite
+*.sqlite3
+instance/
+__pycache__/
+*.pyc
+.DS_Store
