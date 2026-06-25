@@ -15,7 +15,6 @@ def get_connection():
 def _column_exists(cursor, table_name, column_name):
     cursor.execute(f"PRAGMA table_info({table_name})")
     columns = cursor.fetchall()
-
     return any(column["name"] == column_name for column in columns)
 
 
@@ -40,12 +39,10 @@ def _table_exists(cursor, table_name):
         """
         SELECT name
         FROM sqlite_master
-        WHERE type = 'table'
-          AND name = ?
+        WHERE type = 'table' AND name = ?
         """,
         (table_name,),
     )
-
     return cursor.fetchone() is not None
 
 
@@ -58,7 +55,6 @@ def _get_setting(cursor, key):
         """,
         (key,),
     )
-
     row = cursor.fetchone()
 
     if not row:
@@ -128,10 +124,12 @@ def _create_model_status_tables(cursor):
             id INTEGER PRIMARY KEY,
             model_name TEXT DEFAULT 'Ridge Regression',
             trained INTEGER DEFAULT 0,
+            samples INTEGER DEFAULT 0,
             samples_used INTEGER DEFAULT 0,
             mae REAL,
             last_trained TEXT,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            message TEXT DEFAULT 'Cold start: model will train after more completed tasks.'
         )
     """)
 
@@ -140,11 +138,13 @@ def _create_model_status_tables(cursor):
             id INTEGER PRIMARY KEY,
             model_name TEXT DEFAULT 'Logistic Regression Risk Model',
             trained INTEGER DEFAULT 0,
+            samples INTEGER DEFAULT 0,
             samples_used INTEGER DEFAULT 0,
             overtime_accuracy REAL,
             late_accuracy REAL,
             last_trained TEXT,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            message TEXT DEFAULT 'Cold start: risk model will train after more completed tasks.'
         )
     """)
 
@@ -161,15 +161,13 @@ def _migrate_tasks_table(cursor):
     cursor.execute("""
         UPDATE tasks
         SET created_at = CURRENT_TIMESTAMP
-        WHERE created_at IS NULL
-           OR created_at = ''
+        WHERE created_at IS NULL OR created_at = ''
     """)
 
     cursor.execute("""
         UPDATE tasks
         SET status = 'pending'
-        WHERE status IS NULL
-           OR status = ''
+        WHERE status IS NULL OR status = ''
     """)
 
     cursor.execute("""
@@ -184,6 +182,18 @@ def _migrate_tasks_table(cursor):
         WHERE used_recommendation IS NULL
     """)
 
+    cursor.execute("""
+        UPDATE tasks
+        SET repeat_type = 'none'
+        WHERE repeat_type IS NULL OR repeat_type = ''
+    """)
+
+    cursor.execute("""
+        UPDATE tasks
+        SET repeat_interval = 1
+        WHERE repeat_interval IS NULL OR repeat_interval < 1
+    """)
+
 
 def _migrate_task_history_table(cursor):
     _add_column_if_missing(cursor, "task_history", "source_task_id INTEGER")
@@ -196,8 +206,7 @@ def _migrate_task_history_table(cursor):
     cursor.execute("""
         UPDATE task_history
         SET created_at = CURRENT_TIMESTAMP
-        WHERE created_at IS NULL
-           OR created_at = ''
+        WHERE created_at IS NULL OR created_at = ''
     """)
 
     cursor.execute("""
@@ -218,55 +227,49 @@ def _migrate_task_history_table(cursor):
         WHERE weekend_deadline IS NULL
     """)
 
-    cursor.execute("""
-    UPDATE tasks
-    SET repeat_type = 'none'
-    WHERE repeat_type IS NULL
-       OR repeat_type = ''
-    """)
-
-    cursor.execute("""
-    UPDATE tasks
-    SET repeat_interval = 1
-    WHERE repeat_interval IS NULL
-       OR repeat_interval < 1
-    """)
-
 
 def _migrate_model_status_tables(cursor):
     _add_column_if_missing(cursor, "ml_model_status", "model_name TEXT DEFAULT 'Ridge Regression'")
     _add_column_if_missing(cursor, "ml_model_status", "trained INTEGER DEFAULT 0")
+    _add_column_if_missing(cursor, "ml_model_status", "samples INTEGER DEFAULT 0")
     _add_column_if_missing(cursor, "ml_model_status", "samples_used INTEGER DEFAULT 0")
     _add_column_if_missing(cursor, "ml_model_status", "mae REAL")
     _add_column_if_missing(cursor, "ml_model_status", "last_trained TEXT")
     _add_column_if_missing(cursor, "ml_model_status", "updated_at TEXT")
+    _add_column_if_missing(cursor, "ml_model_status", "message TEXT")
 
     _add_column_if_missing(cursor, "risk_model_status", "model_name TEXT DEFAULT 'Logistic Regression Risk Model'")
     _add_column_if_missing(cursor, "risk_model_status", "trained INTEGER DEFAULT 0")
+    _add_column_if_missing(cursor, "risk_model_status", "samples INTEGER DEFAULT 0")
     _add_column_if_missing(cursor, "risk_model_status", "samples_used INTEGER DEFAULT 0")
     _add_column_if_missing(cursor, "risk_model_status", "overtime_accuracy REAL")
     _add_column_if_missing(cursor, "risk_model_status", "late_accuracy REAL")
     _add_column_if_missing(cursor, "risk_model_status", "last_trained TEXT")
     _add_column_if_missing(cursor, "risk_model_status", "updated_at TEXT")
+    _add_column_if_missing(cursor, "risk_model_status", "message TEXT")
 
     cursor.execute("""
         INSERT OR IGNORE INTO ml_model_status (
             id,
             model_name,
             trained,
+            samples,
             samples_used,
             mae,
             last_trained,
-            updated_at
+            updated_at,
+            message
         )
         VALUES (
             1,
             'Ridge Regression',
             0,
             0,
+            0,
             NULL,
             NULL,
-            CURRENT_TIMESTAMP
+            CURRENT_TIMESTAMP,
+            'Cold start: model will train after more completed tasks.'
         )
     """)
 
@@ -275,22 +278,54 @@ def _migrate_model_status_tables(cursor):
             id,
             model_name,
             trained,
+            samples,
             samples_used,
             overtime_accuracy,
             late_accuracy,
             last_trained,
-            updated_at
+            updated_at,
+            message
         )
         VALUES (
             1,
             'Logistic Regression Risk Model',
             0,
             0,
+            0,
             NULL,
             NULL,
             NULL,
-            CURRENT_TIMESTAMP
+            CURRENT_TIMESTAMP,
+            'Cold start: risk model will train after more completed tasks.'
         )
+    """)
+
+    cursor.execute("""
+        UPDATE ml_model_status
+        SET
+            samples = COALESCE(samples, samples_used, 0),
+            samples_used = COALESCE(samples_used, samples, 0),
+            message = CASE
+                WHEN message IS NULL OR message = ''
+                THEN 'Cold start: model will train after more completed tasks.'
+                ELSE message
+            END,
+            updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)
+        WHERE id = 1
+    """)
+
+    cursor.execute("""
+        UPDATE risk_model_status
+        SET
+            samples = COALESCE(samples, samples_used, 0),
+            samples_used = COALESCE(samples_used, samples, 0),
+            message = CASE
+                WHEN message IS NULL OR message = ''
+                THEN 'Cold start: risk model will train after more completed tasks.'
+                ELSE message
+            END,
+            updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)
+        WHERE id = 1
     """)
 
 
@@ -315,7 +350,6 @@ def _migrate_priority_scale(cursor):
     old 2 -> new 3
     old 1 -> new 4
     """
-
     setting_key = "priority_scale_v2_migrated"
 
     if _get_setting(cursor, setting_key) == "1":
@@ -343,7 +377,7 @@ def _migrate_priority_scale(cursor):
                 ELSE priority
             END
             WHERE priority IN (1, 2, 3)
-              AND COALESCE(is_seed, 0) = 0
+            AND COALESCE(is_seed, 0) = 0
         """)
 
     _set_setting(cursor, setting_key, "1")
@@ -383,16 +417,12 @@ def init_db():
     try:
         _create_core_tables(cursor)
         _create_model_status_tables(cursor)
-
         _migrate_tasks_table(cursor)
         _migrate_task_history_table(cursor)
         _migrate_model_status_tables(cursor)
-
         _migrate_priority_scale(cursor)
-
         _create_indexes(cursor)
 
         conn.commit()
-
     finally:
         conn.close()

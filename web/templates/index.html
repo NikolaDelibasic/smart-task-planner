@@ -11,9 +11,20 @@ Manage your tasks, deadlines, AI duration recommendations, priority levels, and 
 {% block content %}
 
 {% if workload and workload.level != "none" %}
-<div class="alert {% if workload.level == 'high' %}alert-danger{% else %}alert-warning{% endif %} shadow-sm mb-4">
+<div class="workload-notice-restore d-none mb-4" id="workloadNoticeRestore">
+    <button type="button" class="workload-notice-restore-btn" id="restoreWorkloadNoticeBtn">
+        <span class="workload-notice-restore-icon">↺</span>
+        Show Workload Notice
+    </button>
+</div>
+
+<div
+    class="alert {% if workload.level == 'high' %}alert-danger workload-notice-high{% else %}alert-warning workload-notice-medium{% endif %} workload-notice shadow-sm mb-4"
+    id="workloadNotice"
+    data-workload-key="{{ workload.level }}-{{ workload.utilization }}-{{ workload.active_count }}-{{ workload.total_minutes }}-{{ workload.urgent_count }}-{{ workload.risk_count }}"
+>
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
-        <div>
+        <div class="flex-grow-1 workload-notice-content">
             <h3 class="h5 mb-2">
                 {% if workload.level == "high" %}
                     Workload Warning
@@ -39,13 +50,25 @@ Manage your tasks, deadlines, AI duration recommendations, priority levels, and 
             {% endif %}
         </div>
 
-        <span class="badge {% if workload.level == 'high' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
-            {% if workload.level == "high" %}
-                High Pressure
-            {% else %}
-                Monitor Workload
-            {% endif %}
-        </span>
+        <div class="d-flex align-items-start gap-2 workload-notice-actions">
+            <span class="badge {% if workload.level == 'high' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
+                {% if workload.level == "high" %}
+                    High Pressure
+                {% else %}
+                    Monitor Workload
+                {% endif %}
+            </span>
+
+            <button
+                type="button"
+                class="workload-notice-close"
+                id="dismissWorkloadNoticeBtn"
+                aria-label="Dismiss workload notice"
+                title="Hide workload notice"
+            >
+                <span aria-hidden="true">×</span>
+            </button>
+        </div>
     </div>
 </div>
 {% endif %}
@@ -184,24 +207,19 @@ Manage your tasks, deadlines, AI duration recommendations, priority levels, and 
                 </div>
 
                 <div class="row g-3 mt-3 d-none" id="assistantDetails">
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <div class="small text-muted">Recommended Time</div>
                         <div class="h5 mb-0">
                             <span id="recommendedMinutes">0</span> min
                         </div>
                     </div>
 
-                    <div class="col-md-3">
-                        <div class="small text-muted">Confidence</div>
-                        <div class="h6 mb-0" id="confidenceText">-</div>
-                    </div>
-
-                    <div class="col-md-3">
-                        <div class="small text-muted">Time Risk</div>
+                    <div class="col-md-4">
+                        <div class="small text-muted">Duration Risk</div>
                         <span class="badge text-bg-secondary" id="timeRiskBadge">-</span>
                     </div>
 
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <div class="small text-muted">Deadline Risk</div>
                         <span class="badge text-bg-secondary" id="deadlineRiskBadge">-</span>
                     </div>
@@ -327,7 +345,7 @@ Manage your tasks, deadlines, AI duration recommendations, priority levels, and 
                             {% if t["status"] != "completed" and t["risk"] %}
                                 <div class="d-flex flex-wrap gap-2 mt-3">
                                     <span class="badge text-bg-secondary">
-                                        Time risk: {{ t["risk"]["overtime_risk"] }}
+                                        Duration risk: {{ t["risk"]["overtime_risk"] }}
                                     </span>
 
                                     <span class="badge text-bg-secondary">
@@ -387,7 +405,6 @@ const usedRecommendationInput = document.getElementById("usedRecommendationInput
 const assistantMessage = document.getElementById("assistantMessage");
 const assistantDetails = document.getElementById("assistantDetails");
 const recommendedMinutes = document.getElementById("recommendedMinutes");
-const confidenceText = document.getElementById("confidenceText");
 const timeRiskBadge = document.getElementById("timeRiskBadge");
 const deadlineRiskBadge = document.getElementById("deadlineRiskBadge");
 const assistantSuggestion = document.getElementById("assistantSuggestion");
@@ -396,6 +413,8 @@ const resetFormBtn = document.getElementById("resetFormBtn");
 const repeatTypeInput = document.getElementById("repeatTypeInput");
 const repeatIntervalInput = document.getElementById("repeatIntervalInput");
 const repeatIntervalHelp = document.getElementById("repeatIntervalHelp");
+
+const WORKLOAD_NOTICE_STORAGE_KEY = "smart_task_planner_dismissed_workload_notice";
 
 let latestRecommendation = null;
 let recommendationTimer = null;
@@ -413,10 +432,6 @@ function resetRecommendationState(message = "Enter priority, deadline, and plann
 
     if (recommendedMinutes) {
         recommendedMinutes.textContent = "0";
-    }
-
-    if (confidenceText) {
-        confidenceText.textContent = "-";
     }
 
     if (timeRiskBadge) {
@@ -485,7 +500,7 @@ async function refreshRecommendation() {
         const data = await response.json();
 
         if (!response.ok || !data.ok) {
-            resetRecommendationState("Smart Assistant could not generate a recommendation for this input.");
+            resetRecommendationState("Smart Assistant is temporarily unavailable. You can still use your planned duration.");
             return;
         }
 
@@ -497,10 +512,6 @@ async function refreshRecommendation() {
 
         if (recommendedMinutes) {
             recommendedMinutes.textContent = data.recommended;
-        }
-
-        if (confidenceText) {
-            confidenceText.textContent = data.assistant?.confidence_text || data.confidence || "-";
         }
 
         if (timeRiskBadge) {
@@ -516,6 +527,7 @@ async function refreshRecommendation() {
         if (assistantMessage) {
             assistantMessage.textContent =
                 data.assistant?.summary ||
+                data.assistant?.message ||
                 "Smart Assistant generated a recommendation.";
         }
 
@@ -530,7 +542,7 @@ async function refreshRecommendation() {
         }
 
     } catch (error) {
-        resetRecommendationState("Smart Assistant is temporarily unavailable.");
+        resetRecommendationState("Smart Assistant is temporarily unavailable. You can still use your planned duration.");
     }
 }
 
@@ -572,6 +584,61 @@ function updateRepeatIntervalState() {
             repeatIntervalHelp.textContent = "Example: 1 = every month, 2 = every 2 months.";
         }
     }
+}
+
+function initWorkloadNotice() {
+    const notice = document.getElementById("workloadNotice");
+    const dismissButton = document.getElementById("dismissWorkloadNoticeBtn");
+    const restoreContainer = document.getElementById("workloadNoticeRestore");
+    const restoreButton = document.getElementById("restoreWorkloadNoticeBtn");
+
+    if (!notice || !dismissButton) {
+        return;
+    }
+
+    const workloadKey = notice.dataset.workloadKey || "default";
+    const dismissedData = getJsonFromStorage(WORKLOAD_NOTICE_STORAGE_KEY, {});
+    const currentDismissKey = `${todayKey()}::${workloadKey}`;
+
+    function hideNotice(animate = true) {
+        if (animate) {
+            notice.classList.add("workload-notice-hidden");
+
+            setTimeout(() => {
+                notice.classList.add("d-none");
+                restoreContainer?.classList.remove("d-none");
+            }, 180);
+        } else {
+            notice.classList.add("d-none");
+            restoreContainer?.classList.remove("d-none");
+        }
+    }
+
+    function showNotice() {
+        localStorage.removeItem(WORKLOAD_NOTICE_STORAGE_KEY);
+
+        notice.classList.remove("d-none");
+        notice.classList.remove("workload-notice-hidden");
+        restoreContainer?.classList.add("d-none");
+    }
+
+    if (dismissedData.key === currentDismissKey) {
+        hideNotice(false);
+        return;
+    }
+
+    dismissButton.addEventListener("click", () => {
+        saveJsonToStorage(WORKLOAD_NOTICE_STORAGE_KEY, {
+            key: currentDismissKey,
+            dismissedAt: new Date().toISOString(),
+        });
+
+        hideNotice(true);
+    });
+
+    restoreButton?.addEventListener("click", () => {
+        showNotice();
+    });
 }
 
 priorityInput?.addEventListener("change", scheduleRecommendationRefresh);
@@ -1201,6 +1268,7 @@ function maybeShowMotivationalAlert(forceShow = false) {
 
 ensureNotificationCenter();
 renderNotificationCenter();
+initWorkloadNotice();
 
 document.addEventListener("click", () => {
     unlockAlertSound();
