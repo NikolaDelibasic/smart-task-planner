@@ -9,6 +9,7 @@ Create a focused plan using your own available time blocks, AI duration estimate
 {% endblock %}
 
 {% block content %}
+
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body p-4">
         <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
@@ -46,7 +47,7 @@ Create a focused plan using your own available time blocks, AI duration estimate
                         class="form-select"
                     >
                         {% for n in range(1, max_planner_blocks + 1) %}
-                            <option value="{{ n }}" {% if n == planner_block_count %}selected{% endif %}>
+                            <option value="{{ n }}" {% if planner_block_count == n %}selected{% endif %}>
                                 {{ n }}
                             </option>
                         {% endfor %}
@@ -143,51 +144,46 @@ Create a focused plan using your own available time blocks, AI duration estimate
 
                 <div class="row g-3" id="plannerBlocks">
                     {% for i in range(1, max_planner_blocks + 1) %}
-                    <div
-                        class="col-lg-6 planner-block-row"
-                        data-block-row="{{ i }}"
-                        {% if i > planner_block_count %}style="display: none;"{% endif %}
-                    >
-                        <div class="task-block h-100">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h5 class="h6 mb-0">Block {{ i }}</h5>
-
-                                <span class="badge text-bg-secondary">
-                                    Session {{ i }}
-                                </span>
-                            </div>
-
-                            <div class="row g-3">
-                                <div class="col-6">
-                                    <label for="block{{ i }}Start" class="form-label">Start</label>
-                                    <input
-                                        type="time"
-                                        class="form-control planner-block-start"
-                                        id="block{{ i }}Start"
-                                        name="block_{{ i }}_start"
-                                        data-block-index="{{ i }}"
-                                        value="{{ planner_block_fields['block_' ~ i ~ '_start'] }}"
-                                    >
+                        <div
+                            class="col-lg-6 planner-block-row"
+                            data-block-index="{{ i }}"
+                            {% if i > planner_block_count %}style="display: none;"{% endif %}
+                        >
+                            <div class="task-block h-100">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="h6 mb-0">Block {{ i }}</h5>
+                                    <span class="badge text-bg-secondary">Session {{ i }}</span>
                                 </div>
 
-                                <div class="col-6">
-                                    <label for="block{{ i }}End" class="form-label">End</label>
-                                    <input
-                                        type="time"
-                                        class="form-control planner-block-end"
-                                        id="block{{ i }}End"
-                                        name="block_{{ i }}_end"
-                                        data-block-index="{{ i }}"
-                                        value="{{ planner_block_fields['block_' ~ i ~ '_end'] }}"
-                                    >
-                                </div>
-                            </div>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="block{{ i }}Start" class="form-label">Start</label>
+                                        <input
+                                            type="time"
+                                            class="form-control"
+                                            id="block{{ i }}Start"
+                                            name="block_{{ i }}_start"
+                                            value="{{ request.args.get('block_' ~ i ~ '_start', '') }}"
+                                        >
+                                    </div>
 
-                            <div class="form-text mt-2">
-                                Example: 09:00–10:30
+                                    <div class="col-md-6">
+                                        <label for="block{{ i }}End" class="form-label">End</label>
+                                        <input
+                                            type="time"
+                                            class="form-control"
+                                            id="block{{ i }}End"
+                                            name="block_{{ i }}_end"
+                                            value="{{ request.args.get('block_' ~ i ~ '_end', '') }}"
+                                        >
+                                    </div>
+                                </div>
+
+                                <div class="form-text mt-2">
+                                    Example: 09:00–10:30
+                                </div>
                             </div>
                         </div>
-                    </div>
                     {% endfor %}
                 </div>
             </div>
@@ -201,65 +197,87 @@ Create a focused plan using your own available time blocks, AI duration estimate
         <h3 class="h5 mb-3">Planner Summary</h3>
 
         <p class="text-muted mb-3">
-            Total planning range:
-            <strong>{{ planner_meta.start_time }} – {{ planner_meta.end_time }}</strong>
-            · Total available:
-            <strong>{{ planner_meta.available_minutes }} min</strong>
-            · Scheduled:
-            <strong>{{ planner_meta.scheduled_minutes }} min</strong>
-            · Break:
-            <strong>{{ planner_meta.break_minutes }} min</strong>
-            · AI duration:
-            <strong>{% if planner_meta.use_predicted %}enabled{% else %}disabled{% endif %}</strong>
-            · Split:
-            <strong>{% if planner_meta.allow_split %}enabled{% else %}disabled{% endif %}</strong>
+            Total planning range: {{ planner_meta.start_time }} – {{ planner_meta.end_time }}
+            · Total available: {{ planner_meta.available_minutes }} min
+            · Scheduled: {{ planner_meta.scheduled_minutes }} min
+            · Break: {{ planner_meta.break_minutes }} min
+            · AI duration: {% if planner_meta.use_predicted %}enabled{% else %}disabled{% endif %}
+            · Split: {% if planner_meta.allow_split %}enabled{% else %}disabled{% endif %}
         </p>
 
         {% if planner_meta.blocks %}
-        <div class="d-flex flex-wrap gap-2">
-            {% for block in planner_meta.blocks %}
-                <span class="badge text-bg-secondary">
-                    Block {{ block.index }}: {{ block.start }}–{{ block.end }} · {{ block.minutes }} min
-                </span>
-            {% endfor %}
-        </div>
+            <div class="d-flex flex-wrap gap-2">
+                {% for block in planner_meta.blocks %}
+                    <span class="badge text-bg-secondary">
+                        Block {{ block.index }}: {{ block.start }}–{{ block.end }} · {{ block.minutes }} min
+                    </span>
+                {% endfor %}
+            </div>
         {% endif %}
     </div>
 </div>
 {% endif %}
 
 {% if workload and workload.level != "none" %}
-<div class="alert {% if workload.level == 'high' %}alert-danger{% else %}alert-warning{% endif %} shadow-sm">
-    <h3 class="h5">
-        {% if workload.level == "high" %}
-            Planner Overload Warning
-        {% else %}
-            Planner Workload Notice
-        {% endif %}
-    </h3>
+<div class="workload-notice-restore d-none mb-4" id="plannerWorkloadNoticeRestore">
+    <button type="button" class="workload-notice-restore-btn" id="restorePlannerWorkloadNoticeBtn">
+        <span class="workload-notice-restore-icon">↺</span>
+        Show Planner Workload Notice
+    </button>
+</div>
 
-    <p class="mb-2">
-        Utilization: {{ workload.utilization }}%
-        · Active tasks: {{ workload.active_count }}
-        · Urgent tasks: {{ workload.urgent_count }}
-        · High-risk tasks: {{ workload.risk_count }}
-    </p>
+<div
+    class="alert {% if workload.level == 'high' %}alert-danger workload-notice-high{% else %}alert-warning workload-notice-medium{% endif %} workload-notice shadow-sm mb-4"
+    id="plannerWorkloadNotice"
+    data-workload-key="{{ workload.level }}-{{ workload.utilization }}-{{ workload.active_count }}-{{ workload.total_minutes }}-{{ workload.urgent_count }}-{{ workload.risk_count }}"
+>
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+        <div class="flex-grow-1 workload-notice-content">
+            <h3 class="h5 mb-2">
+                {% if workload.level == "high" %}
+                    Workload Warning
+                {% else %}
+                    Workload Notice
+                {% endif %}
+            </h3>
 
-    {% if workload.warnings %}
-        <ul class="mb-2">
-            {% for warning in workload.warnings %}
-                <li>{{ warning }}</li>
-            {% endfor %}
-        </ul>
-    {% endif %}
+            <p class="mb-2">
+                Utilization: {{ workload.utilization }}%
+                · Active tasks: {{ workload.active_count }}
+                · Total planned: {{ workload.total_minutes }} min
+                · Urgent tasks: {{ workload.urgent_count }}
+                · High-risk tasks: {{ workload.risk_count }}
+            </p>
 
-    <span class="badge {% if workload.level == 'high' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
-        {% if workload.level == "high" %}
-            High Pressure
-        {% else %}
-            Monitor Workload
-        {% endif %}
-    </span>
+            {% if workload.warnings %}
+                <ul class="mb-0">
+                    {% for warning in workload.warnings %}
+                        <li>{{ warning }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+
+        <div class="d-flex align-items-start gap-2 workload-notice-actions">
+            <span class="badge {% if workload.level == 'high' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
+                {% if workload.level == "high" %}
+                    High Pressure
+                {% else %}
+                    Monitor Workload
+                {% endif %}
+            </span>
+
+            <button
+                type="button"
+                class="workload-notice-close"
+                id="dismissPlannerWorkloadNoticeBtn"
+                aria-label="Dismiss planner workload notice"
+                title="Hide workload notice"
+            >
+                <span aria-hidden="true">×</span>
+            </button>
+        </div>
+    </div>
 </div>
 {% endif %}
 
@@ -267,9 +285,8 @@ Create a focused plan using your own available time blocks, AI duration estimate
     <div class="card-body p-4">
         <h3 class="h5 mb-3">
             Scheduled Timeline
-
             {% if planner_meta and planner_meta.has_valid_blocks %}
-                <span class="text-muted">
+                <span class="text-muted small">
                     {{ planner_meta.start_time }}–{{ planner_meta.end_time }}
                 </span>
             {% endif %}
@@ -278,66 +295,70 @@ Create a focused plan using your own available time blocks, AI duration estimate
         {% if schedule %}
             <div class="d-flex flex-column gap-3">
                 {% for item in schedule %}
-                <div class="task-block">
-                    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
-                        <div>
-                            <div class="small text-muted">
-                                {{ item.start }} – {{ item.end }}
-                            </div>
+                    <div class="task-block">
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                            <div>
+                                <div class="small text-muted mb-1">
+                                    {{ item.start }} – {{ item.end }}
+                                </div>
 
-                            <h4 class="h6 mb-2">
-                                {{ item.title }}
+                                <h4 class="h6 mb-2">
+                                    {{ item.title }}
+                                    {% if item.is_split %}
+                                        <span class="text-muted">· {{ item.part_label }}</span>
+                                    {% endif %}
+                                </h4>
 
-                                {% if item.is_split %}
-                                    <span class="text-muted">· {{ item.part_label }}</span>
-                                {% endif %}
-                            </h4>
-
-                            <div class="d-flex flex-wrap gap-2">
-                                <span class="badge text-bg-{{ item.priority_badge }}">
-                                    {{ item.priority_label }}
-                                </span>
-
-                                <span class="badge text-bg-secondary">
-                                    {{ item.duration }} min
-                                </span>
-
-                                {% if item.is_split %}
-                                    <span class="badge text-bg-info">Split Task</span>
-                                {% endif %}
-
-                                {% if not item.used_recommendation and item.predicted_duration != item.planned_duration %}
-                                    <span class="badge text-bg-primary">
-                                        planned {{ item.planned_duration }} / AI {{ item.predicted_duration }}
+                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                    <span class="badge text-bg-secondary">
+                                        {{ item.priority_label }}
                                     </span>
-                                {% endif %}
+
+                                    <span class="badge text-bg-primary">
+                                        {{ item.duration }} min
+                                    </span>
+
+                                    {% if item.is_split %}
+                                        <span class="badge text-bg-info">
+                                            Split Task
+                                        </span>
+                                    {% endif %}
+
+                                    {% if not item.used_recommendation and item.predicted_duration != item.planned_duration %}
+                                        <span class="badge text-bg-warning">
+                                            planned {{ item.planned_duration }} / AI {{ item.predicted_duration }}
+                                        </span>
+                                    {% endif %}
+                                </div>
+
+                                <div class="small text-muted">
+                                    Deadline: {{ item.deadline }}
+                                    · Block {{ item.block_index }}: {{ item.block_start }}–{{ item.block_end }}
+                                </div>
                             </div>
 
-                            <div class="small text-muted mt-2">
-                                Deadline: {{ item.deadline }}
-                                · Block {{ item.block_index }}: {{ item.block_start }}–{{ item.block_end }}
-                            </div>
-                        </div>
-
-                        <div class="text-end">
-                            <span class="badge text-bg-success">Scheduled</span>
-
-                            <div class="small text-muted mt-2">
-                                {{ item.start }} - {{ item.end }}
+                            <div class="text-end">
+                                <div class="badge text-bg-success mb-2">Scheduled</div>
+                                <div class="small text-muted">
+                                    {{ item.start }} - {{ item.end }}
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
                 {% endfor %}
             </div>
         {% elif planner_meta and planner_meta.has_valid_blocks %}
-            <p class="text-muted mb-0">
-                No active tasks could be scheduled for the selected planning window.
-            </p>
+            <div class="task-block text-center py-4">
+                <p class="text-muted mb-0">
+                    No active tasks could be scheduled for the selected planning window.
+                </p>
+            </div>
         {% else %}
-            <p class="text-muted mb-0">
-                Enter at least one valid time block to generate a timeline.
-            </p>
+            <div class="task-block text-center py-4">
+                <p class="text-muted mb-0">
+                    Enter at least one valid time block to generate a timeline.
+                </p>
+            </div>
         {% endif %}
     </div>
 </div>
@@ -350,139 +371,160 @@ Create a focused plan using your own available time blocks, AI duration estimate
         {% if unscheduled %}
             <div class="d-flex flex-column gap-3">
                 {% for t in unscheduled %}
-                <div class="task-block">
-                    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
-                        <div>
-                            <h4 class="h6 mb-2">{{ t["title"] }}</h4>
+                    <div class="task-block">
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                            <div>
+                                <h4 class="h6 mb-2">{{ t["title"] }}</h4>
 
-                            <div class="d-flex flex-wrap gap-2">
-                                <span class="badge text-bg-{{ t['priority_badge'] }}">
-                                    {{ t["priority_label"] }}
-                                </span>
+                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                    <span class="badge text-bg-secondary">
+                                        {{ t["priority_label"] }}
+                                    </span>
 
-                                {% if t["is_partial"] %}
-                                    <span class="badge text-bg-warning">Partially scheduled</span>
-                                {% endif %}
+                                    {% if t["is_partial"] %}
+                                        <span class="badge text-bg-warning">
+                                            Partially scheduled
+                                        </span>
+                                    {% endif %}
+                                </div>
+
+                                <div class="small text-muted">
+                                    Planned: {{ t["planned_duration"] if t["planned_duration"] is defined else t["duration"] }} min
+
+                                    {% if t["predicted_duration"] is defined and (not t["used_recommendation"]) and t["predicted_duration"] != t["planned_duration"] %}
+                                        · AI estimate: {{ t["predicted_duration"] }} min
+                                    {% endif %}
+
+                                    {% if t["remaining_duration"] is defined %}
+                                        · Remaining unscheduled: {{ t["remaining_duration"] }} min
+                                    {% endif %}
+
+                                    {% if t["scheduled_duration"] is defined and t["scheduled_duration"] > 0 %}
+                                        · Already scheduled: {{ t["scheduled_duration"] }} min
+                                    {% endif %}
+                                </div>
+
+                                <div class="small text-muted mt-1">
+                                    Deadline: {{ t["deadline"] }}
+                                </div>
                             </div>
 
-                            <div class="small text-muted mt-2">
-                                Planned:
-                                {{ t["planned_duration"] if t["planned_duration"] is defined else t["duration"] }} min
-
-                                {% if t["predicted_duration"] is defined and (not t["used_recommendation"]) and t["predicted_duration"] != t["planned_duration"] %}
-                                    · AI estimate: {{ t["predicted_duration"] }} min
-                                {% endif %}
-
-                                {% if t["remaining_duration"] is defined %}
-                                    · Remaining unscheduled: {{ t["remaining_duration"] }} min
-                                {% endif %}
-
-                                {% if t["scheduled_duration"] is defined and t["scheduled_duration"] > 0 %}
-                                    · Already scheduled: {{ t["scheduled_duration"] }} min
-                                {% endif %}
-                            </div>
-
-                            <div class="small text-muted">
-                                Deadline: {{ t["deadline"] }}
-                            </div>
+                            <span class="badge text-bg-danger">
+                                Unscheduled
+                            </span>
                         </div>
-
-                        <span class="badge text-bg-secondary">Unscheduled</span>
                     </div>
-                </div>
                 {% endfor %}
             </div>
         {% else %}
-            <p class="text-muted mb-0">
-                All active tasks fit into the selected planning window.
-            </p>
+            <div class="task-block text-center py-4">
+                <p class="text-muted mb-0">
+                    All active tasks fit into the selected planning window.
+                </p>
+            </div>
         {% endif %}
     </div>
 </div>
 {% endif %}
+
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
-const plannerForm = document.getElementById("plannerForm");
 const blockCountInput = document.getElementById("blockCountInput");
+const plannerBlockRows = document.querySelectorAll(".planner-block-row");
+const PLANNER_WORKLOAD_STORAGE_KEY = "smart_task_planner_dismissed_planner_workload_notice";
+
+function plannerTodayKey() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+}
+
+function getPlannerJsonFromStorage(key, fallback = {}) {
+    try {
+        return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+    } catch (error) {
+        return fallback;
+    }
+}
+
+function savePlannerJsonToStorage(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
+}
 
 function updatePlannerBlockVisibility() {
-    const count = Number(blockCountInput?.value || 1);
+    if (!blockCountInput) {
+        return;
+    }
 
-    document.querySelectorAll(".planner-block-row").forEach((row) => {
-        const index = Number(row.dataset.blockRow || 1);
-        const isVisible = index <= count;
+    const count = Number(blockCountInput.value || 1);
 
-        row.style.display = isVisible ? "" : "none";
-
-        row.querySelectorAll("input").forEach((input) => {
-            input.required = isVisible;
-            input.disabled = !isVisible;
-
-            if (!isVisible) {
-                input.setCustomValidity("");
-            }
-        });
+    plannerBlockRows.forEach((row) => {
+        const index = Number(row.dataset.blockIndex || 0);
+        row.style.display = index <= count ? "" : "none";
     });
 }
 
-function validatePlannerBlocks() {
-    const count = Number(blockCountInput?.value || 1);
-    let isValid = true;
+function initPlannerWorkloadNotice() {
+    const notice = document.getElementById("plannerWorkloadNotice");
+    const dismissButton = document.getElementById("dismissPlannerWorkloadNoticeBtn");
+    const restoreContainer = document.getElementById("plannerWorkloadNoticeRestore");
+    const restoreButton = document.getElementById("restorePlannerWorkloadNoticeBtn");
 
-    for (let i = 1; i <= count; i++) {
-        const startInput = document.getElementById(`block${i}Start`);
-        const endInput = document.getElementById(`block${i}End`);
+    if (!notice || !dismissButton) {
+        return;
+    }
 
-        if (!startInput || !endInput) {
-            continue;
-        }
+    const workloadKey = notice.dataset.workloadKey || "default";
+    const dismissedData = getPlannerJsonFromStorage(PLANNER_WORKLOAD_STORAGE_KEY, {});
+    const currentDismissKey = `${plannerTodayKey()}::${workloadKey}`;
 
-        startInput.setCustomValidity("");
-        endInput.setCustomValidity("");
+    function hideNotice(animate = true) {
+        if (animate) {
+            notice.classList.add("workload-notice-hidden");
 
-        if (!startInput.value) {
-            startInput.setCustomValidity("Please enter a start time for this block.");
-            isValid = false;
-            continue;
-        }
-
-        if (!endInput.value) {
-            endInput.setCustomValidity("Please enter an end time for this block.");
-            isValid = false;
-            continue;
-        }
-
-        if (endInput.value <= startInput.value) {
-            endInput.setCustomValidity("End time must be after start time.");
-            isValid = false;
+            setTimeout(() => {
+                notice.classList.add("d-none");
+                restoreContainer?.classList.remove("d-none");
+            }, 180);
+        } else {
+            notice.classList.add("d-none");
+            restoreContainer?.classList.remove("d-none");
         }
     }
 
-    return isValid;
+    function showNotice() {
+        localStorage.removeItem(PLANNER_WORKLOAD_STORAGE_KEY);
+
+        notice.classList.remove("d-none");
+        notice.classList.remove("workload-notice-hidden");
+        restoreContainer?.classList.add("d-none");
+    }
+
+    if (dismissedData.key === currentDismissKey) {
+        hideNotice(false);
+        return;
+    }
+
+    dismissButton.addEventListener("click", () => {
+        savePlannerJsonToStorage(PLANNER_WORKLOAD_STORAGE_KEY, {
+            key: currentDismissKey,
+            dismissedAt: new Date().toISOString(),
+        });
+
+        hideNotice(true);
+    });
+
+    restoreButton?.addEventListener("click", showNotice);
 }
 
-blockCountInput?.addEventListener("change", () => {
-    updatePlannerBlockVisibility();
-    validatePlannerBlocks();
-});
-
-document.querySelectorAll(".planner-block-start, .planner-block-end").forEach((input) => {
-    input.addEventListener("input", validatePlannerBlocks);
-    input.addEventListener("change", validatePlannerBlocks);
-});
-
-plannerForm?.addEventListener("submit", (event) => {
-    updatePlannerBlockVisibility();
-
-    if (!validatePlannerBlocks()) {
-        event.preventDefault();
-        plannerForm.reportValidity();
-    }
-});
+blockCountInput?.addEventListener("change", updatePlannerBlockVisibility);
 
 updatePlannerBlockVisibility();
-validatePlannerBlocks();
+initPlannerWorkloadNotice();
 </script>
 {% endblock %}

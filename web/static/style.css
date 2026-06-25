@@ -1482,3 +1482,15 @@ input[type="time"]::-webkit-calendar-picker-indicator {
     font-size: 0.95rem;
     line-height: 1;
 }
+
+/* =========================
+   STATISTICS MINI CARDS
+========================= */
+
+.stat-mini-card {
+    height: 100%;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.42);
+}
