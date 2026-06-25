@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.5] - 2026-06-25
+
+### Added
+
+- Dismissible Workload Notice
+- X button for hiding Workload Notice
+- Show Workload Notice button for restoring hidden workload information
+- Browser local storage support for dismissed Workload Notice state
+- Automatic Workload Notice reappearance when workload changes or a new day begins
+
+### Improved
+
+- Simplified Smart Assistant user interface
+- Removed Confidence field from the Smart Assistant panel
+- Renamed Time Risk to Duration Risk for clearer user understanding
+- Improved Smart Assistant fallback message when a recommendation is temporarily unavailable
+- Improved Workload Notice styling for the dark theme
+- Improved Workload Notice close button design
+- Improved Statistics page labels for better readability
+- Improved Statistics explanations for completed tasks, task history, planned time, and actual time
+- Improved positive and negative time difference colors on the Statistics page
+- Improved dropdown and input styling for better dark theme compatibility on Windows
+
+### Fixed
+
+- Smart Assistant database migration issue with missing model status columns
+- Recommendation error caused by missing `samples` column in model status tables
+- Empty completed task value on the Statistics page
+- Confusing Statistics labels such as Average Delta and Total Delta
+- User-facing Smart Assistant error message appearing during normal recommendation flow
+- Inconsistent naming between time risk and duration-related task risk
+
 ## [1.4] - 2026-06-24
 
 ### Added
